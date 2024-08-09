@@ -31,10 +31,12 @@ setup(name='lone',
       packages=find_packages(),
       zip_safe=False,
       install_requires=[
+          'wheel',
           'tox',
           'ioctl_opt',
           'pytest-cov',
           'pytest-mock',
+          'pytest-runner',
           'pylama',
           'pyudev',
           'pyyaml',
@@ -47,12 +49,8 @@ setup(name='lone',
           ],
       },
       setup_requires=[
-          'wheel',
-          'pytest-runner'
       ],
       tests_require=[
-          'pytest-cov',
-          'pytest-mock',
       ],
       ext_modules=[
           memory_ext,
