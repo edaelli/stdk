@@ -34,6 +34,7 @@ RUN apt-get -y install \
 	python3-venv \
 	python3-pip \
 	python3-yaml \
+	python3-pandas \
 	pciutils \
     libhugetlbfs-dev \
     vim
@@ -62,7 +63,7 @@ RUN if [ "$piptrust" = "1" ]; then pip3 config set global.trusted-host \
 # Install lone in dist-packages
 ################################################################################
 ADD python3 /tmp/lone
-RUN cd /tmp/lone/ && pip3 install --break-system-packages .
+RUN cd /tmp/lone/ && pip3 install --break-system-packages --ignore-installed .
 RUN rm -rf /tmp/lone
 
 ################################################################################
