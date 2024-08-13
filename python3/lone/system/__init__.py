@@ -1,11 +1,13 @@
 ''' OS Independent interfaces
 '''
-import os
 import sys
 import platform
 import abc
+import ctypes
 import importlib.util
 from enum import Enum
+
+from lone.util.hexdump import hexdump_print
 
 
 class SysRequirements(metaclass=abc.ABCMeta):
@@ -175,47 +177,38 @@ class IovaMgr:
 class MemoryLocation:
     ''' Generic memory location object
     '''
-    def __init__(self, vaddr, iova, size, client, in_use=True):
+    def __init__(self, vaddr, iova, size, client):
         self.vaddr = vaddr
         self.size = size
         self.iova = iova
         self.client = client
-        self.in_use = in_use
+        self.in_use = False
+        self.iova_mapped = False
+        self.iova_direction = None
 
         # List of addresses that are linked (wrt being allocated or not to this memory)
         self.linked_mem = []
 
 
-class Memory(metaclass=abc.ABCMeta):
-    ''' Base memory interface object
+class DevMemMgr(metaclass=abc.ABCMeta):
+    ''' Base DevMemMgr interface object
     '''
-    def __init__(self, page_size):
-        ''' Initializes a memory manager
+    def __init__(self, device):
+        ''' Initializes a DevMemMgr manager
         '''
-        self.page_size = page_size
+        self.device = device
+        self.page_size = device.mps
         self.iova_mgr = IovaMgr(0x0ED00000)
 
     @abc.abstractmethod
     def malloc(self, size, client=None):
-        ''' Allocates low level system memory that can be split up by malloc below
+        ''' Allocates low level system memory
         '''
         raise NotImplementedError
 
     @abc.abstractmethod
     def malloc_pages(self, num_pages, client=None):
-        ''' Allocates a list of MemoryLocation objects of Memory.page_size sized
-        '''
-        raise NotImplementedError
-
-    @abc.abstractmethod
-    def __enter__(self):
-        ''' Enter the context manager
-        '''
-        raise NotImplementedError
-
-    @abc.abstractmethod
-    def __exit__(self, exc_type, exc_value, exc_traceback):
-        ''' Exit the context manager cleaning up all our memory
+        ''' Allocates a list of MemoryLocation objects of DevMemMgr.page_size sized
         '''
         raise NotImplementedError
 
@@ -237,6 +230,30 @@ class Memory(metaclass=abc.ABCMeta):
         '''
         raise NotImplementedError
 
+    def __str__(self):
+        ret = ''
+        if len(self.allocated_mem_list()):
+            ret = '{:<45} {:>18}   {:>10}   {:>10}  {:4}  {:4}  {}\n'.format(
+                'client', 'vaddr', 'iova', 'size', 'in_use', 'iova_mapped', 'direction')
+            for m in self.allocated_mem_list():
+                ret += (f'{m.client:<45} 0x{m.vaddr:016X}   0x{m.iova:08X}'
+                        f'0x{m.size:08X}  {m.in_use:>6}  {m.iova_mapped:>11}  {m.iova_direction}\n')
+        return ret
+
+    def dump(self, dumper=print):
+        for m in self.allocated_mem_list():
+            data = (ctypes.c_uint8 * m.size).from_address(m.vaddr)
+
+            dumper(f'client:         {m.client}')
+            dumper(f'vaddr:          0x{m.vaddr:X}')
+            dumper(f'iova:           0x{m.iova:X}')
+            dumper(f'size:           0x{m.size:X}')
+            dumper(f'in_use:         {m.in_use}')
+            dumper(f'iova_mapped:    {m.iova_mapped}')
+            dumper(f'iova_direction: {m.iova_direction}')
+            hexdump_print(data, printer=dumper)
+            dumper()
+
 
 # Now for each supported OS, pick the objects that implement the
 #  interfaces above
@@ -250,7 +267,7 @@ if platform.system() == 'Linux':
 
     # If the user is calling this before installing lone
     #   hugepages will not be there. We don't want to fail
-    #   here so just leave the MemoryMgr empty
+    #   here so just leave the DevMemMgr empty
     # Using importlib to be able to test it in unittests
     mem_mgr = None
     hp_spec = importlib.util.find_spec('lone.system.linux.hugepages_mgr')
@@ -272,4 +289,4 @@ class System:
     PciDevice = syspci_device
     PciUserspace = syspci_userspace
     PciUserspaceDevice = syspci_userspace_device
-    MemoryMgr = mem_mgr
+    DevMemMgr = mem_mgr

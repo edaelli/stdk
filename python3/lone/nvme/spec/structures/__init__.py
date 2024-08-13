@@ -3,6 +3,8 @@ import inspect
 
 from lone.util.struct_tools import StructFieldsIterator
 from lone.util.hexdump import hexdump
+from lone.system import DMADirection
+from lone.nvme.spec.prp import PRP
 
 import logging
 logger = logging.getLogger('nvme_struct')
@@ -118,14 +120,45 @@ class SQECommon(ctypes.Structure, DataDumper):
 
         # Create data in/out object if the command has one
         if hasattr(self, 'data_in_type') and self.data_in_type is not None:
+            # Create Data in type
             self.data_in = self.data_in_type()
+
+            # Allocate PRP and Memory for it if requested. User requests it by
+            #   passing in a mem_mgr when creating the command
+            if 'mem_mgr' in kwargs:
+                mem_mgr = kwargs['mem_mgr']
+                prp = PRP(mem_mgr, len(self),
+                          mem_mgr.device.mps,
+                          DMADirection.DEVICE_TO_HOST,
+                          ' '.join([hex(id(self)), self.__class__.__name__]))
+
+                # Set PRP
+                self.prp_in = prp
+                self.DPTR.PRP.PRP1 = prp.prp1
+                self.DPTR.PRP.PRP2 = prp.prp2
         else:
             self.data_in = None
+            self.prp_in = None
 
         if hasattr(self, 'data_out_type') and self.data_out_type is not None:
             self.data_out = self.data_out_type()
+
+            # Allocate PRP and Memory for it if requested. User requests it by
+            #   passing in a mem_mgr when creating the command
+            if 'mem_mgr' in kwargs:
+                mem_mgr = kwargs['mem_mgr']
+                prp = PRP(mem_mgr, len(self),
+                          mem_mgr.device.mps,
+                          DMADirection.HOST_TO_DEVICE,
+                          ' '.join([hex(id(self)), self.__class__.__name__]))
+
+                # Set PRP
+                self.prp_out = prp
+                self.DPTR.PRP.PRP1 = prp.prp1
+                self.DPTR.PRP.PRP2 = prp.prp2
         else:
             self.data_out = None
+            self.prp_out = None
 
         # Add variables to track start/end times for the command
         self.start_time_ns = 0
@@ -140,9 +173,6 @@ class SQECommon(ctypes.Structure, DataDumper):
         self.cqe = CQE()
         self.complete = False
         self.posted = False
-
-        # Keep track of any prps used by the command that may need to be freed
-        self.prps = []
 
         # Context variable so users can keep track of non-standard things
         self.context = None
@@ -171,10 +201,10 @@ class SQECommon(ctypes.Structure, DataDumper):
         return self.time_us / 1000000
 
     def __del__(self):
-        if hasattr(self, 'prps'):
-            if len(self.prps):
-                logger.warning('Command being deleted with {} allocated PRPs!'.format(
-                    len(self.prps)))
+        if self.prp_in is not None:
+            self.prp_in.free_all_memory()
+        if self.prp_out is not None:
+            self.prp_out.free_all_memory()
 
 
 class DataOutCommon(ctypes.Structure, DataDumper):

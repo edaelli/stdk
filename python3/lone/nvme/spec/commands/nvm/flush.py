@@ -1,6 +1,5 @@
 import ctypes
 from lone.nvme.spec.structures import NVMCommand
-from lone.nvme.spec.commands.status_codes import NVMeStatusCode, status_codes
 
 
 class Flush(NVMCommand):

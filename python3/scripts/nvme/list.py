@@ -6,12 +6,14 @@ from types import SimpleNamespace
 # lone imports
 from lone.system import System
 from lone.nvme.device import NVMeDevice
+from lone.nvme.device.identify import NVMeDeviceIdentifyData
 from lone.util.logging import log_format
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-v', '--verbose', action='store_true', help='Turn on debug logging')
+    parser.add_argument('--pci-slot', default=None, help='Only list device at this pci slot')
     args = parser.parse_args()
 
     # Set our global logging config here depending on what the user requested
@@ -24,29 +26,46 @@ def main():
     print(fmt.format('-' * 16, '-' * 20, '-' * 40, '-' * 9, '-' * 26, '-' * 16, '-' * 8))
 
     # One of the system's interfaces is the current OS's view of all exposed devices we
-    #   can work with. Use that interface and list them all
-    for device in [SimpleNamespace(pci_slot='nvsim')] + System.PciUserspace().exposed_devices():
-        # Pci slot
-        pci_slot = device.pci_slot
+    #   can work with. Use that interface and list them all, unless the user requested a
+    #   specific one
+    if args.pci_slot:
+        pci_slots = [args.pci_slot]
+    else:
+        devices = [SimpleNamespace(pci_slot='nvsim')] + System.PciUserspace().exposed_devices()
+        pci_slots = [device.pci_slot for device in devices]
 
-        # We are using the NVMeDemoDriver for this right now. It is a simple driver that
-        #   allows us to send commands to and get responses from a device. This is not a full
-        #   function driver, but good enough for a demo
+    # Print info on all devices
+    for pci_slot in pci_slots:
+        # Create the nvme device object
         nvme_device = NVMeDevice(pci_slot)
 
-        # Set admin queues, re-enable
-        nvme_device.cc_disable()
-        nvme_device.init_admin_queues(asq_entries=16, acq_entries=16)
-        nvme_device.cc_enable()
-        nvme_device.identify()
-        identify_controller_data = nvme_device.identify_data['controller']
+        # Create a memory manager to work with the device
+        mem_mgr = System.DevMemMgr(nvme_device)
 
-        for ns_id, ns in enumerate(nvme_device.namespaces):
+        # Disable the device. Free all memory (not really needed here since we just
+        #   created the mem_mgr and have not allocated anything, but leaving in for
+        #   demonstration purposes)
+        nvme_device.cc_disable()
+        mem_mgr.free_all()
+
+        # Init admin queues, re-enable
+        nvme_device.init_admin_queues(mem_mgr, 256, 16)
+        nvme_device.cc_enable()
+
+        # Get identify data from the device
+        id_data = NVMeDeviceIdentifyData(nvme_device, mem_mgr)
+
+        # Create IO queues
+        nvme_device.create_io_queues(mem_mgr, num_queues=10, queue_entries=256, sq_nvme_set_id=0)
+        nvme_device.delete_io_queues()
+
+        # Print all namespaces and their info
+        for ns_id, ns in enumerate(id_data.namespaces):
             if ns:
                 # Print the information for this device and namespace
                 print(fmt.format(pci_slot,
-                                 identify_controller_data.SN.strip().decode(),
-                                 identify_controller_data.MN.strip().decode(),
+                                 id_data.controller.SN.strip().decode(),
+                                 id_data.controller.MN.strip().decode(),
                                  ns_id,
                                  '{:>6} {} / {:>6} {}'.format(ns.ns_usage,
                                                               ns.ns_unit,
@@ -55,7 +74,14 @@ def main():
                                  '{:>3} {:>4} + {} B'.format(ns.lba_size,
                                                              ns.lba_unit,
                                                              ns.ms_bytes),
-                                 identify_controller_data.FR.strip().decode()))
+                                 id_data.controller.FR.strip().decode()))
+
+        # All done, disable device and free all memory
+        nvme_device.cc_disable()
+        mem_mgr.free_all()
+
+        # Verify that all memory is freed
+        assert len(mem_mgr.allocated_mem_list()) == 0, 'Exiting with allocated memory!'
 
 
 if __name__ == '__main__':

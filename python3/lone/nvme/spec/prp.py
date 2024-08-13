@@ -10,9 +10,11 @@ logger = logging.getLogger('prp')
 
 class PRP:
 
-    def __init__(self, num_bytes, mps):
+    def __init__(self, mem_mgr, num_bytes, mps, direction, client):
+        self.mem_mgr = mem_mgr
         self.num_bytes = num_bytes
         self.mps = mps
+        self.client = client
 
         self.prp1 = 0
         self.prp1_mem = None
@@ -35,16 +37,15 @@ class PRP:
         self.lists_needed = math.ceil(
             (self.pages_needed - 1) / self.prps_per_page) if self.pages_needed > 2 else 0
 
-        self.allocated_memory = False
+        # Allocate memory
+        self.alloc(direction)
 
-    def malloc_page(self, direction, client='prp_malloc'):
-        mem = self.nvme_device.malloc_and_map_iova(self.mps, direction, client=client)
+    def malloc_page(self, direction, client):
+        mem = self.mem_mgr.malloc(self.mps, direction, client=' '.join([self.client, client]))
         self.mem_list.append(mem)
         return mem
 
-    def alloc(self, nvme_device, data_dma_direction):
-        self.nvme_device = nvme_device
-        self.allocated_memory = True
+    def alloc(self, data_dma_direction):
 
         # Less than MPS, only need PRP1, no offset
         # The memory list has to be one item large enough for mps
@@ -182,7 +183,7 @@ class PRP:
 
     def free_all_memory(self):
         for mem in self.mem_list:
-            self.nvme_device.free_and_unmap_iova(mem)
+            self.mem_mgr.free(mem)
 
     def get_data_segments(self):
         segments = []

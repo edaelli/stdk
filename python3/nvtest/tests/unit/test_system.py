@@ -94,8 +94,8 @@ def test_system_interface(mocker):
     mem
 
     from lone.system import Memory
-    mocker.patch("lone.system.Memory.__abstractmethods__", set())
-    mem_mgr = Memory(4096)
+    mocker.patch("lone.system.DevMemMgr.__abstractmethods__", set())
+    mem_mgr = DevMemMgr(4096)
     with pytest.raises(NotImplementedError):
         mem_mgr.malloc(0)
     with pytest.raises(NotImplementedError):

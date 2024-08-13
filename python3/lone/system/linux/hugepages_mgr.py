@@ -5,30 +5,32 @@ import hugepages
 import math
 import ctypes
 
-from lone.system import Memory, MemoryLocation
+from lone.system import DevMemMgr, MemoryLocation, DMADirection
 
 
-class HugePagesMemoryMgr(Memory):
+class HugePagesMemoryMgr(DevMemMgr):
     ''' Uses hugepage backed memory but allocates and frees it in chunks of
         a certain page size.
     '''
 
-    def __init__(self, page_size):
-        self.page_size = page_size
-        self.hugepages_memory = HugePagesMemory(page_size)
-
+    def __init__(self, device):
         # Initialize parent
-        super().__init__(page_size)
+        super().__init__(device)
+
+        self.hugepages_memory = HugePagesMemory(self.page_size)
 
         # Allocate one huge page initially
         self.pages = []
         self._malloc_hps(1)
 
+        # Keep track of memory given out on malloc calls
+        self.malloc_mem = []
+
     def free_pages(self):
         return [p for p in self.pages if p.in_use is False]
 
     def allocated_mem_list(self):
-        return self.pages
+        return self.malloc_mem
 
     def _malloc_hps(self, num_hps):
         ''' Allocates a certain number of hugepages and splits them up into
@@ -44,10 +46,9 @@ class HugePagesMemoryMgr(Memory):
                 self.pages.append(MemoryLocation(vaddr + (pg_idx * self.page_size),
                                                  0,
                                                  self.page_size,
-                                                 __class__.__name__,
-                                                 in_use=False))
+                                                 __class__.__name__))
 
-    def malloc(self, size, client='HugePagesMemoryMgr'):
+    def malloc(self, size, direction, client='HugePagesMemoryMgr'):
         ''' Allocates whatever number of pages needed to satisfy a
             contiguous memory area of size
             Will allocate more hugepages if needed
@@ -109,7 +110,26 @@ class HugePagesMemoryMgr(Memory):
         # Mark in use
         ret_mem.in_use = True
 
+        # Add to our tracking list
+        self.malloc_mem.append(ret_mem)
+
+        # Map it with the device
+        self.map_iova(ret_mem, direction)
+
+        # Return it!
         return ret_mem
+
+    def map_iova(self, mem, direction):
+        # Map the vaddr to an iova with the device
+        if direction == DMADirection.HOST_TO_DEVICE:
+            self.device.pci_userspace_device.map_dma_region_read(mem.vaddr, mem.iova, mem.size)
+        elif direction == DMADirection.DEVICE_TO_HOST:
+            self.device.pci_userspace_device.map_dma_region_write(mem.vaddr, mem.iova, mem.size)
+        else:
+            assert False, 'Direction {} not yet supported!'.format(direction)
+
+        mem.iova_direction = direction
+        mem.iova_mapped = True
 
     def malloc_pages(self, num_pages, client='HugePagesMemoryMgr'):
         ''' Allocates a number of free pages. Not guaranteed to be contiguous!
@@ -138,13 +158,18 @@ class HugePagesMemoryMgr(Memory):
             m.in_use = False
             m.size = self.page_size
 
+        # Clear linked memory
+        memory.linked_mem = []
+
         # If no links, just the first one
         assert memory.in_use is True
         memory.in_use = False
         memory.size = self.page_size
 
-        # Clear linked memory
-        memory.linked_mem = []
+        # Unmap the iova with the device
+        assert memory.iova_mapped is True
+        self.device.pci_userspace_device.unmap_dma_region(memory.iova, memory.size)
+        memory.iova_mapped = False
 
         # Free the iova used for this memory
         self.iova_mgr.free(memory.iova)
@@ -152,20 +177,24 @@ class HugePagesMemoryMgr(Memory):
         # Clear free'd memory
         ctypes.memset(memory.vaddr, 0, memory.size)
 
+        # Remove from tracking list
+        self.malloc_mem.remove(memory)
+
     def free_all(self):
         ''' Free all pages and hugepages memory previously allocated (no checks for double free)
         '''
+        malloc = self.malloc_mem.copy()
+        for m in malloc:
+            self.free(m)
+
         # Remove all pages from our tracking list
         self.pages = []
 
         # Free all backing hugepages
         self.hugepages_memory._free_all()
 
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_value, exc_traceback):
-        self.free_all()
+        # Make sure it is all gone!
+        assert len(self.malloc_mem) == 0, 'Memory not free after free_all'
 
 
 class HugePagesMemory():

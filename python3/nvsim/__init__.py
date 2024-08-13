@@ -5,7 +5,7 @@ import threading
 from types import SimpleNamespace
 
 from lone.nvme.device import NVMeDeviceCommon
-from lone.system import Memory, MemoryLocation
+from lone.system import DevMemMgr, MemoryLocation
 from lone.nvme.spec.registers.pcie_regs import PCIeRegistersDirect
 from lone.nvme.spec.registers.nvme_regs import NVMeRegistersDirect
 from nvsim.state import NVSimState
@@ -66,7 +66,7 @@ class NVMeSimulator(NVMeDeviceCommon):
     ''' Implementation that uses a simulator thread to simulate a NVMe device
     '''
 
-    class SimMemMgr(Memory):
+    class SimMemMgr(DevMemMgr):
         ''' Simulated memory implemenation
         '''
         def __init__(self, page_size):
