@@ -107,8 +107,10 @@ class NVMeStatusCodes:
                 v.value == command.cqe.SF.SC and (
                     v.cmd_type == type(command) or v.cmd_type in type(command).__bases__))]
 
-        assert len(c) == 1, 'Found {} status codes for command!'.format(len(c))
-        return c[0]
+        if len(c) == 0:
+            return NVMeStatusCode(command.cqe.SF.SC, 'Unknown', type(command))
+        else:
+            return c[0]
 
     def check(self, command, raise_exc=True):
 
