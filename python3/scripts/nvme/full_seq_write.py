@@ -45,7 +45,7 @@ def initialize_device(pci_slot, queue_depth):
     nvme_device.init_admin_queues(asq_entries=asq_depth, acq_entries=acq_depth)
     nvme_device.cc_enable()
     nvme_device.init_msix_interrupts(num_io_queues + 1, 0)
-    nvme_device.init_io_queues(num_io_queues, io_queue_depth)
+    nvme_device.create_io_queues(num_io_queues, io_queue_depth)
     nvme_device.identify()
 
     # Return the nvme_device to the caller

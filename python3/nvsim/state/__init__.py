@@ -59,11 +59,12 @@ class NVSimNamespace:
 
 class NVSimState:
 
-    def __init__(self, pcie_regs, nvme_regs, injectors):
+    def __init__(self, pcie_regs, nvme_regs, mem_mgr, injectors):
         self.mps = 4096
 
         self.pcie_regs = pcie_regs
         self.nvme_regs = nvme_regs
+        self.mem_mgr = mem_mgr
         self.injectors = injectors
 
         self.queue_mgr = QueueMgr()

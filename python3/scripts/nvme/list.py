@@ -39,8 +39,8 @@ def main():
         # Create the nvme device object
         nvme_device = NVMeDevice(pci_slot)
 
-        # Create a memory manager to work with the device
-        mem_mgr = System.DevMemMgr(nvme_device)
+        # Device's memory manager. Implements the DevMemMgr interface
+        mem_mgr = nvme_device.mem_mgr
 
         # Disable the device. Free all memory (not really needed here since we just
         #   created the mem_mgr and have not allocated anything, but leaving in for
@@ -49,14 +49,14 @@ def main():
         mem_mgr.free_all()
 
         # Init admin queues, re-enable
-        nvme_device.init_admin_queues(mem_mgr, 256, 16)
+        nvme_device.init_admin_queues(256, 16)
         nvme_device.cc_enable()
 
         # Get identify data from the device
-        id_data = NVMeDeviceIdentifyData(nvme_device, mem_mgr)
+        id_data = NVMeDeviceIdentifyData(nvme_device)
 
         # Create IO queues
-        nvme_device.create_io_queues(mem_mgr, num_queues=10, queue_entries=256, sq_nvme_set_id=0)
+        nvme_device.create_io_queues(num_queues=1, queue_entries=16)
         nvme_device.delete_io_queues()
 
         # Print all namespaces and their info

@@ -24,9 +24,9 @@ class NVSimWrite:
 
         else:
             # Make a PRP object from the command's information
-            prp = PRP((wr_cmd.NLB + 1) * ns.block_size, nvsim_state.mps).from_address(
-                wr_cmd.DPTR.PRP.PRP1,
-                wr_cmd.DPTR.PRP.PRP2)
+            prp = PRP(None, (wr_cmd.NLB + 1) * ns.block_size, nvsim_state.mps, None,
+                      'NVSimWrite', alloc=False).from_address(wr_cmd.DPTR.PRP.PRP1,
+                                                              wr_cmd.DPTR.PRP.PRP2)
 
             # Write data to nvsim's storage
             ns.write(wr_cmd.SLBA, wr_cmd.NLB + 1, prp)
@@ -54,9 +54,9 @@ class NVSimRead:
         else:
 
             # Make a PRP object from the command's information
-            prp = PRP((rd_cmd.NLB + 1) * ns.block_size, nvsim_state.mps).from_address(
-                rd_cmd.DPTR.PRP.PRP1,
-                rd_cmd.DPTR.PRP.PRP2)
+            prp = PRP(None, (rd_cmd.NLB + 1) * ns.block_size, nvsim_state.mps, None,
+                      'NVSimRead', alloc=False).from_address(rd_cmd.DPTR.PRP.PRP1,
+                                                             rd_cmd.DPTR.PRP.PRP2)
 
             # Read data from nvsim's storage
             ns.read(rd_cmd.SLBA, rd_cmd.NLB + 1, prp)

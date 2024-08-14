@@ -10,7 +10,7 @@ logger = logging.getLogger('prp')
 
 class PRP:
 
-    def __init__(self, mem_mgr, num_bytes, mps, direction, client):
+    def __init__(self, mem_mgr, num_bytes, mps, direction, client, alloc=True):
         self.mem_mgr = mem_mgr
         self.num_bytes = num_bytes
         self.mps = mps
@@ -38,7 +38,8 @@ class PRP:
             (self.pages_needed - 1) / self.prps_per_page) if self.pages_needed > 2 else 0
 
         # Allocate memory
-        self.alloc(direction)
+        if alloc == True:
+            self.alloc(direction)
 
     def malloc_page(self, direction, client):
         mem = self.mem_mgr.malloc(self.mps, direction, client=' '.join([self.client, client]))

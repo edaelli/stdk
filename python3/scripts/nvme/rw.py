@@ -7,6 +7,7 @@ import logging
 from lone.nvme.device import NVMeDevice
 
 # Import NVMe spec objects we will use for commands
+from lone.nvme.device.identify import NVMeDeviceIdentifyData
 from lone.nvme.spec.commands.nvm.read import Read
 from lone.nvme.spec.commands.nvm.write import Write
 from lone.nvme.spec.prp import PRP
@@ -20,7 +21,6 @@ def main():
     parser.add_argument('-v', '--verbose', action='store_true', help='Turn on debug logging')
     parser.add_argument('pci_slot', type=str)
     parser.add_argument('namespace', type=int)
-    parser.add_argument('--slba', type=int, default=0)
     parser.add_argument('--block-size', type=int, default=32 * 1024)
     parser.add_argument('--num-cmds', type=int, default=32)
     args = parser.parse_args()
@@ -38,15 +38,17 @@ def main():
     nvme_device.cc_disable()
     nvme_device.init_admin_queues(asq_entries=16, acq_entries=16)
     nvme_device.cc_enable()
-    nvme_device.identify()
+
+    # Get identify data from the device
+    id_data = NVMeDeviceIdentifyData(nvme_device)
 
     num_io_queues = 1
     io_queues_depth = 256
     logger.info('Creating {} IO queues with {} entries each'.format(num_io_queues, io_queues_depth))
-    nvme_device.init_io_queues(num_io_queues, io_queues_depth)
+    nvme_device.create_io_queues(num_io_queues, io_queues_depth)
 
     # Get the namespace's information
-    ns = nvme_device.namespaces[args.namespace]
+    ns = id_data.namespaces[args.namespace]
 
     # Make sure the namespace is valid
     assert ns is not None, 'NSID: {} is not valid on the drive'.format(args.namespace)
@@ -58,8 +60,7 @@ def main():
     nlb = num_blocks - 1
 
     # Create and map PRP for the write
-    write_prp = PRP(xfer_len, nvme_device.mps)
-    write_prp.alloc(nvme_device, DMADirection.HOST_TO_DEVICE)
+    write_prp = PRP(nvme_device.mem_mgr, xfer_len, nvme_device.mps, DMADirection.HOST_TO_DEVICE, 'write_prp')
 
     # Create command, set PRP, fill in data
     write_cmd = Write(NSID=args.namespace, NLB=nlb)
@@ -69,17 +70,16 @@ def main():
     write_cmd.DPTR.PRP.PRP2 = write_prp.prp2
 
     # Random LBA generator
-    slbas = LBARandGenLFSR(ns.nsze, num_blocks, initial_state=237, start_lba=args.slba)
+    slbas = LBARandGenLFSR(ns.nsze, num_blocks, initial_state=237)
 
     # Send the requested commands
     for i in range(args.num_cmds):
         write_cmd.SLBA = slbas.next()
         write_cmd.complete = False
-        nvme_device.sync_cmd(write_cmd, alloc_mem=False, timeout_s=1)
+        nvme_device.sync_cmd(write_cmd, timeout_s=1)
 
     # Create and map PRP for the read
-    read_prp = PRP(xfer_len, nvme_device.mps)
-    read_prp.alloc(nvme_device, DMADirection.DEVICE_TO_HOST)
+    read_prp = PRP(nvme_device.mem_mgr, xfer_len, nvme_device.mps, DMADirection.DEVICE_TO_HOST, 'read_prp')
 
     # Create command, set PRP
     read_cmd = Read(NSID=args.namespace, NLB=nlb)
@@ -97,7 +97,7 @@ def main():
         # Update SLBA
         read_cmd.SLBA = slbas.next()
         read_cmd.complete = False
-        nvme_device.sync_cmd(read_cmd, alloc_mem=False, timeout_s=1)
+        nvme_device.sync_cmd(read_cmd, timeout_s=1)
 
         # Get the data in from the read prp
         data_in = read_prp.get_data_buffer()

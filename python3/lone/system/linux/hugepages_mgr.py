@@ -17,6 +17,7 @@ class HugePagesMemoryMgr(DevMemMgr):
         # Initialize parent
         super().__init__(device)
 
+        # NOTE: device must implement the SysPciUserspaceDevice interface
         self.hugepages_memory = HugePagesMemory(self.page_size)
 
         # Allocate one huge page initially

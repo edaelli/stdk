@@ -37,7 +37,8 @@ class NVSimIdentify:
             self.__class__.__name__, id_cmd.CNS))
 
         # Create the PRP at the location from the command
-        prp = PRP(IdentifyData.size, nvsim_state.mps).from_address(id_cmd.DPTR.PRP.PRP1)
+        prp = PRP(nvsim_state.mem_mgr, IdentifyData.size, nvsim_state.mps, None,
+                  'sim identify', alloc=False).from_address(id_cmd.DPTR.PRP.PRP1)
 
         # Based on CNS, we have to simulate different structures for responses
         if id_cmd.CNS == IdentifyController().CNS:
@@ -206,8 +207,9 @@ class NVSimGetLogPage:
                 return self.complete(command, sq, cq, status_codes['Invalid Field in Command'])
 
             # Copy data to the host's PRP
-            prp = PRP(num_bytes, nvsim_state.mps).from_address(glp_cmd.DPTR.PRP.PRP1,
-                                                               glp_cmd.DPTR.PRP.PRP2)
+            prp = PRP(None, num_bytes, nvsim_state.mps, None,
+                      'sim glp', alloc=False).from_address(glp_cmd.DPTR.PRP.PRP1,
+                                                           glp_cmd.DPTR.PRP.PRP2)
             prp.set_data_buffer(data_out)
 
             # Complete command

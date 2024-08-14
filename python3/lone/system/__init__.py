@@ -201,14 +201,8 @@ class DevMemMgr(metaclass=abc.ABCMeta):
         self.iova_mgr = IovaMgr(0x0ED00000)
 
     @abc.abstractmethod
-    def malloc(self, size, client=None):
+    def malloc(self, size, direction, client=None):
         ''' Allocates low level system memory
-        '''
-        raise NotImplementedError
-
-    @abc.abstractmethod
-    def malloc_pages(self, num_pages, client=None):
-        ''' Allocates a list of MemoryLocation objects of DevMemMgr.page_size sized
         '''
         raise NotImplementedError
 

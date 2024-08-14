@@ -5,6 +5,7 @@ import enum
 from lone.system import System, DMADirection
 from lone.injection import Injection
 from lone.nvme.spec.queues import QueueMgr, NVMeSubmissionQueue, NVMeCompletionQueue
+from lone.nvme.spec.prp import PRP
 from lone.nvme.spec.structures import CQE
 from lone.nvme.spec.commands.admin.create_io_completion_q import CreateIOCompletionQueue
 from lone.nvme.spec.commands.admin.create_io_submission_q import CreateIOSubmissionQueue
@@ -104,18 +105,18 @@ class NVMeDeviceCommon:
                 break
             time.sleep(0)
 
-    def init_admin_queues(self, mem_mgr, asq_entries, acq_entries):
+    def init_admin_queues(self, asq_entries, acq_entries):
         # Make sure the device is disabled before messing with queues
         self.cc_disable()
 
         # Allocate admin queue memory
-        asq_mem = mem_mgr.malloc(self.sq_entry_size * asq_entries,
-                                 DMADirection.HOST_TO_DEVICE,
-                                 client='asq')
+        asq_mem = self.mem_mgr.malloc(self.sq_entry_size * asq_entries,
+                                      DMADirection.HOST_TO_DEVICE,
+                                      client='asq')
 
-        acq_mem = mem_mgr.malloc(self.cq_entry_size * acq_entries,
-                                 DMADirection.DEVICE_TO_HOST,
-                                 client='acq')
+        acq_mem = self.mem_mgr.malloc(self.cq_entry_size * acq_entries,
+                                      DMADirection.DEVICE_TO_HOST,
+                                      client='acq')
 
         # Stop the device from mastering the bus while we set admin queues up
         self.pcie_regs.CMD.BME = 0
@@ -151,14 +152,14 @@ class NVMeDeviceCommon:
                            ctypes.addressof(self.nvme_regs.SQNDBS[0]) + 4,
                            0))
 
-    def create_io_queue_pair(self, mem_mgr,
+    def create_io_queue_pair(self,
                              cq_entries, cq_id, cq_iv, cq_ien, cq_pc,
                              sq_entries, sq_id, sq_prio, sq_pc, sq_setid):
 
         # Allocate memory for the completion queue, and map with for write with the iommu
-        cq_mem = mem_mgr.malloc(self.cq_entry_size * cq_entries,
-                                DMADirection.DEVICE_TO_HOST,
-                                client=f'iocq_{cq_id}')
+        cq_mem = self.mem_mgr.malloc(self.cq_entry_size * cq_entries,
+                                     DMADirection.DEVICE_TO_HOST,
+                                     client=f'iocq_{cq_id}')
 
         # Create the CreateIOCompletionQueue command
         create_iocq_cmd = CreateIOCompletionQueue()
@@ -180,9 +181,9 @@ class NVMeDeviceCommon:
         self.sync_cmd(create_iocq_cmd)
 
         # Allocate memory for the submission queue, and map with for read with the iommu
-        sq_mem = mem_mgr.malloc(self.sq_entry_size * sq_entries,
-                                DMADirection.HOST_TO_DEVICE,
-                                client=f'iosq_{sq_id}')
+        sq_mem = self.mem_mgr.malloc(self.sq_entry_size * sq_entries,
+                                     DMADirection.HOST_TO_DEVICE,
+                                     client=f'iosq_{sq_id}')
 
         # Create the CreateIOSubmissionQueue command
         create_iosq_cmd = CreateIOSubmissionQueue()
@@ -213,7 +214,7 @@ class NVMeDeviceCommon:
                            cq_iv),
                            )
 
-    def create_io_queues(self, mem_mgr, num_queues=10, queue_entries=256, sq_nvme_set_id=0):
+    def create_io_queues(self, num_queues=10, queue_entries=256, sq_nvme_set_id=0):
 
         # Has the ADMIN queue been initialized?
         assert self.nvme_regs.AQA.ASQS != 0, 'admin queues are NOT initialized!'
@@ -224,7 +225,6 @@ class NVMeDeviceCommon:
         # Create each queue requested
         for queue_id in range(1, num_queues + 1):
             self.create_io_queue_pair(
-                mem_mgr,
                 queue_entries, queue_id, queue_id, 1, 1,
                 queue_entries, queue_id, 0, 1, 0)
 
@@ -251,52 +251,6 @@ class NVMeDeviceCommon:
             # Delete IO completion queue
             del_cq_cmd = DeleteIOCompletionQueue(QID=cqid)
             self.sync_cmd(del_cq_cmd, timeout_s=1)
-
-    def ns_size(self, lba_ds_bytes, nsze, nuse):
-
-        unit = 'B'
-        divisor = 1
-        usage = lba_ds_bytes * nuse
-        total = lba_ds_bytes * nsze
-
-        if total < (10 ** 3):
-            unit = 'B'
-            divisor = 1
-        elif total < (10 ** 6):
-            unit = 'KB'
-            divisor = (10 ** 3)
-        elif total < (10 ** 9):
-            unit = 'MB'
-            divisor = (10 ** 6)
-        elif total < (10 ** 12):
-            unit = 'GB'
-            divisor = (10 ** 9)
-        else:
-            unit = 'TB'
-            divisor = (10 ** 12)
-
-        usage = round(((lba_ds_bytes * nuse) / divisor), 2)
-        total = round(((lba_ds_bytes * nsze) / divisor), 2)
-
-        return usage, total, unit
-
-    def lba_ds_size(self, lba_ds_bytes):
-
-        unit = 'B'
-        divisor = 1
-
-        if lba_ds_bytes > 1024:
-            unit = 'KiB'
-            divisor = 1024
-
-        size = lba_ds_bytes // divisor
-        return size, unit
-
-    def identify(self):
-        ''' Tries to send as many identify commands as possible and builds up internal
-            structures to be used later
-        '''
-        pass
 
     def post_command(self, command):
 
@@ -468,6 +422,39 @@ class NVMeDeviceCommon:
         # Return the qpair in which the command was posted
         return sqid, cqid
 
+    def alloc(self, command):
+        # Allocate memory that can be used with this device, direction dev to host
+        if hasattr(command, 'data_in_type') and command.data_in_type is not None:
+
+            # Allocate memory, set PRPs
+            prp = PRP(self.mem_mgr, len(command),
+                      self.mem_mgr.device.mps,
+                      DMADirection.DEVICE_TO_HOST,
+                      ' '.join([hex(id(command)), command.__class__.__name__]))
+
+            # Set PRP
+            command.prp_in = prp
+            command.DPTR.PRP.PRP1 = prp.prp1
+            command.DPTR.PRP.PRP2 = prp.prp2
+
+        # Allocate memory that can be used with this device, direction host to dev
+        if hasattr(command, 'data_out_type') and command.data_out_type is not None:
+
+            # Allocate memory, set PRPs
+            prp = PRP(self.mem_mgr, len(command),
+                      self.mem_mgr.device.mps,
+                      DMADirection.HOST_TO_DEVICE,
+                      ' '.join([hex(id(command)), command.__class__.__name__]))
+
+            # Set PRP
+            command.prp_out = prp
+            command.DPTR.PRP.PRP1 = prp.prp1
+            command.DPTR.PRP.PRP2 = prp.prp2
+
+            # Copy data out to it
+            prp.set_data_buffer(bytes(command.data_out))
+
+        return command
 
 def NVMeDevice(pci_slot):
     ''' Helper function to allow tests/modules/etc to pick a physical or simulated
@@ -501,11 +488,15 @@ class NVMeDevicePhysical(NVMeDeviceCommon):
         # Initialize common
         super().__init__()
 
+        # Memory manager that works with this device. Initialize after common
+        #  because it needs device.mps
+        self.mem_mgr = System.DevMemMgr(self)
+
     def init_msix_interrupts(self, num_vectors, start=0):
         self.num_msix_vectors = start + num_vectors
-        self.pci_userspace_dev_ifc.enable_msix(num_vectors, start)
+        self.pci_userspace_device.enable_msix(num_vectors, start)
         self.int_type = NVMeDeviceIntType.MSIX
         self.get_completions = self.get_msix_completions
 
     def get_msix_vector_pending_count(self, vector):
-        return self.pci_userspace_dev_ifc.get_msix_vector_pending_count(vector)
+        return self.pci_userspace_device.get_msix_vector_pending_count(vector)

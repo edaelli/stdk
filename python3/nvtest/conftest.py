@@ -183,7 +183,7 @@ def nvme_device(request, lone_config):
         nvme_device.cc_disable()
         nvme_device.init_admin_queues(asq_entries=asq_entries, acq_entries=acq_entries)
         nvme_device.cc_enable()
-        nvme_device.init_io_queues(num_queues=num_io_queues, queue_entries=io_queue_entries)
+        nvme_device.create_io_queues(num_queues=num_io_queues, queue_entries=io_queue_entries)
         nvme_device.identify()
 
         yield nvme_device

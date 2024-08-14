@@ -4,6 +4,7 @@ import time
 
 # lone imports
 from lone.nvme.device import NVMeDevice
+from lone.nvme.device.identify import NVMeDeviceIdentifyData
 
 
 def main():
@@ -17,8 +18,7 @@ def main():
     nvme_device.cc_disable()
     nvme_device.init_admin_queues(asq_entries=16, acq_entries=16)
     nvme_device.cc_enable()
-    nvme_device.identify()
-    identify_controller_data = nvme_device.identify_data['controller']
+    id_data = NVMeDeviceIdentifyData(nvme_device)
 
     # Get the PCIeExpress capability to set the "Initiate FLR" bit
     pcie_cap = [cap for cap in nvme_device.pcie_regs.capabilities if
@@ -27,9 +27,9 @@ def main():
     assert nvme_device.nvme_regs.CC.EN == 1, "Device not enabled before FLR"
     print('Initiating FLR on slot: {} SN: {} MN: {} FR: {}'.format(
         args.pci_slot,
-        identify_controller_data.SN,
-        identify_controller_data.MN,
-        identify_controller_data.FR))
+        id_data.controller.SN,
+        id_data.controller.MN,
+        id_data.controller.FR))
     pcie_cap.PXDC.IFLR = 1
     time.sleep(0.2)
     assert nvme_device.nvme_regs.CC.EN == 0, "Device not disabled after FLR"
@@ -37,12 +37,11 @@ def main():
     # Re-initialize the device and get the identify data again
     nvme_device.init_admin_queues(asq_entries=16, acq_entries=16)
     nvme_device.cc_enable()
-    nvme_device.identify()
-    identify_controller_data_after = nvme_device.identify_data['controller']
+    id_data_after = NVMeDeviceIdentifyData(nvme_device)
 
-    assert identify_controller_data.SN == identify_controller_data_after.SN
-    assert identify_controller_data.MN == identify_controller_data_after.MN
-    assert identify_controller_data.FR == identify_controller_data_after.FR
+    assert id_data.controller.SN == id_data_after.controller.SN
+    assert id_data.controller.MN == id_data_after.controller.MN
+    assert id_data.controller.FR == id_data_after.controller.FR
 
 
 if __name__ == '__main__':

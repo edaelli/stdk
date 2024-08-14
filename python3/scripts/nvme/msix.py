@@ -5,6 +5,9 @@ import ctypes
 # lone imports
 from lone.nvme.device import NVMeDevice
 
+if not (sys.version_info.major == 3 and sys.version_info.minor >= 11):
+    print('Python 3.11 is required to run this script (uses os.eventfd)')
+    sys.exit(-1)
 
 def main():
     parser = argparse.ArgumentParser()
@@ -58,7 +61,7 @@ def main():
     nvme_device.cc_enable()
 
     nvme_device.init_msix_interrupts(2, 0)
-    nvme_device.init_io_queues(1, 256)
+    nvme_device.create_io_queues(1, 256)
 
     print('MSI-X MXE: 0x{:x} FM: 0x{:x}'.format(msix_cap.MXC.MXE, msix_cap.MXC.FM))
     print('MSI-X Table Size: {} Offset: 0x{:x}'.format(msix_table_size, msix_table_offset))
@@ -72,8 +75,7 @@ def main():
     from lone.system import DMADirection
 
     # Create and map PRP for the read
-    read_prp = PRP(4096, nvme_device.mps)
-    read_prp.alloc(nvme_device, DMADirection.DEVICE_TO_HOST)
+    read_prp = PRP(nvme_device.mem_mgr, 4096, nvme_device.mps, DMADirection.DEVICE_TO_HOST, 'read_prp')
 
     # Create command, set PRP
     read_cmd = Read(NSID=1, NLB=0)
@@ -81,7 +83,7 @@ def main():
     read_cmd.DPTR.PRP.PRP2 = read_prp.prp2
     read_cmd.SLBA = 0
 
-    nvme_device.start_cmd(read_cmd, 1, 1, alloc_mem=False)
+    nvme_device.start_cmd(read_cmd, 1, 1)
     read_cmd.complete = False
     while read_cmd.complete is False:
         nvme_device.process_completions()

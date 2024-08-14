@@ -17,7 +17,7 @@ logger = logging.getLogger('nvsim_thread')
 
 
 class NVSimThread(threading.Thread):
-    def __init__(self, nvme_device, pcie_regs, nvme_regs):
+    def __init__(self, nvme_device, pcie_regs, nvme_regs, mem_mgr):
         threading.Thread.__init__(self)
         self.stop_event = threading.Event()
         self.exception = None
@@ -26,7 +26,7 @@ class NVSimThread(threading.Thread):
         self.pcie_regs = pcie_regs
         self.nvme_regs = nvme_regs
 
-        self.nvsim_state = NVSimState(pcie_regs, nvme_regs, nvme_device.injectors)
+        self.nvsim_state = NVSimState(pcie_regs, nvme_regs, mem_mgr, nvme_device.injectors)
         self.pcie_handler = PCIeRegChangeHandler(self.nvsim_state)
         self.nvme_handler = NVMeRegChangeHandler(self.nvsim_state)
 
@@ -69,16 +69,17 @@ class NVMeSimulator(NVMeDeviceCommon):
     class SimMemMgr(DevMemMgr):
         ''' Simulated memory implemenation
         '''
-        def __init__(self, page_size):
+        def __init__(self, device):
             ''' Initializes a memory manager
             '''
-            self.page_size = page_size
+            self.device = device
+            self.page_size = device.mps
             self._allocated_mem_list = []
 
             #TODO: Clean this up
             self.iova_mgr = SimpleNamespace(reset=lambda: True)
 
-        def malloc(self, size, client=None):
+        def malloc(self, size, direction, client=None):
             memory_obj = (ctypes.c_uint8 * size)()
 
             # Append to our list so it stays allocated until we choose to free it
@@ -168,11 +169,11 @@ class NVMeSimulator(NVMeDeviceCommon):
         super().__init__()
 
         # Create our memory manager
-        self.mem_mgr = NVMeSimulator.SimMemMgr(self.mps)
+        self.mem_mgr = NVMeSimulator.SimMemMgr(self)
         self.queue_mem = []
 
         # Start the simulator thread
-        self.sim_thread = NVSimThread(self, self.pcie_regs, self.nvme_regs)
+        self.sim_thread = NVSimThread(self, self.pcie_regs, self.nvme_regs, self.mem_mgr)
         self.sim_thread.daemon = True
         self.sim_thread.start()
         logger.info('NVSimThread started')
