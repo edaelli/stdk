@@ -69,7 +69,13 @@ class NVMeDeviceCommon:
 
     def cc_disable(self, timeout_s=10):
         start_time = time.time()
+
+        # Tell the drive to disable
         self.nvme_regs.CC.EN = 0
+
+        # Clear BME
+        self.pcie_regs.CMD.BME = 0
+
         while True:
             if (time.time() - start_time) > timeout_s:
                 assert False, 'Device did not disable in {}s'.format(timeout_s)
@@ -455,6 +461,12 @@ class NVMeDeviceCommon:
             prp.set_data_buffer(bytes(command.data_out))
 
         return command
+
+    def __del__(self):
+        # Disable when no more references to this exist. This helps in cases where
+        #   we see an exception but the drive is still reading/writing to/from pci memory.
+        #   Disabling here hopefully tells the drive it is not allowed to use pci memory anymore
+        self.cc_disable()
 
 def NVMeDevice(pci_slot):
     ''' Helper function to allow tests/modules/etc to pick a physical or simulated

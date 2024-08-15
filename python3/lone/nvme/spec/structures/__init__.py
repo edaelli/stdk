@@ -175,12 +175,6 @@ class SQECommon(ctypes.Structure, DataDumper):
     def time_s(self):
         return self.time_us / 1000000
 
-    def __del__(self):
-        if hasattr(self, 'prp_in') and self.prp_in is not None:
-            self.prp_in.free_all_memory()
-        if hasattr(self, 'prp_out') and self.prp_out is not None:
-            self.prp_out.free_all_memory()
-
 
 class DataOutCommon(ctypes.Structure, DataDumper):
     _pack_ = 1
