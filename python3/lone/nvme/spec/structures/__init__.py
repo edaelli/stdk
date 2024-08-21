@@ -120,8 +120,7 @@ class SQECommon(ctypes.Structure, DataDumper):
         # Create data in/out object if the command has one
 
         # PRPs get set by the device, but make them none for consistency
-        self.prp_in = None
-        self.prp_out = None
+        self.prp = None
 
         if hasattr(self, 'data_in_type') and self.data_in_type is not None:
             # Create Data in type
@@ -174,6 +173,10 @@ class SQECommon(ctypes.Structure, DataDumper):
     @property
     def time_s(self):
         return self.time_us / 1000000
+
+    def free_prps(self):
+        if self.prp is not None:
+            self.prp.free_all_memory()
 
 
 class DataOutCommon(ctypes.Structure, DataDumper):

@@ -71,7 +71,8 @@ class NVMeDeviceIdentifyData:
     def identify_namespaces(self):
 
         # Send an Indentify Namespace List command to get all used namespaces
-        id_ns_list_cmd = self.nvme_device.alloc(IdentifyNamespaceList())
+        id_ns_list_cmd = IdentifyNamespaceList()
+        self.nvme_device.alloc(id_ns_list_cmd)
         self.nvme_device.sync_cmd(id_ns_list_cmd)
 
         # Loop through all active namespaces and send each one IdentifyNamespace commands
@@ -85,7 +86,8 @@ class NVMeDeviceIdentifyData:
             ns = SimpleNamespace(NSID=ns_id)
 
             # Send an Identify Namespace command, check response
-            id_ns_cmd = self.nvme_device.alloc(IdentifyNamespace(NSID=ns_id))
+            id_ns_cmd = IdentifyNamespace(NSID=ns_id)
+            self.nvme_device.alloc(id_ns_cmd)
             self.nvme_device.sync_cmd(id_ns_cmd)
             ns.id_ns_data = id_ns_cmd.data_in
 
@@ -110,7 +112,8 @@ class NVMeDeviceIdentifyData:
         return id_ns_list_cmd.data_in, namespaces
 
     def identify_uuid_list(self):
-        id_uuid_list_cmd = self.nvme_device.alloc(IdentifyUUIDList())
+        id_uuid_list_cmd = IdentifyUUIDList()
+        self.nvme_device.alloc(id_uuid_list_cmd)
         try:
             self.nvme_device.sync_cmd(id_uuid_list_cmd)
         except NVMeStatusCodeException:
@@ -119,6 +122,7 @@ class NVMeDeviceIdentifyData:
 
     def identify_controller(self):
         # Send an Identify controller command, check response
-        id_ctrl_cmd = self.nvme_device.alloc(IdentifyController())
+        id_ctrl_cmd = IdentifyController()
+        self.nvme_device.alloc(id_ctrl_cmd)
         self.nvme_device.sync_cmd(id_ctrl_cmd)
         return id_ctrl_cmd.data_in

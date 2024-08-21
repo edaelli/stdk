@@ -136,13 +136,40 @@ class vfioDeviceReset(VfioIoctl):
     _ioctl_ = 11
 
 
+
+class VfioCapHeader(ctypes.Structure):
+    _fields_ = [
+        ('id', ctypes.c_uint16),
+        ('version', ctypes.c_uint16),
+        ('next', ctypes.c_uint32),
+    ]
+
+class VfioIovaRange(ctypes.Structure):
+    _fields_ = [
+        ('start', ctypes.c_uint64),
+        ('end', ctypes.c_uint64),
+    ]
+
+class VfioCapIovaRanges(ctypes.Structure):
+    _fields_ = [
+        ('header', VfioCapHeader),
+        ('nr_iovas', ctypes.c_uint32),
+        ('reserved', ctypes.c_uint32),
+        ('ranges', 5 * VfioIovaRange),
+    ]
+
 class VfioIommuGetInfo(VfioIoctl):
     _ioctl_ = 12
+
     _fields_ = [
         ('argsz', ctypes.c_uint32),
         ('flags', ctypes.c_uint32),
         ('iova_pgsizes', ctypes.c_uint64),
+        ('cap_offset', ctypes.c_uint32),
+        ('pad', ctypes.c_uint32),
+        ('caps', 1024 * ctypes.c_uint8),
     ]
+    caps_offset = 24
 
 
 class vfioMmuMapDma(VfioIoctl):
@@ -261,6 +288,24 @@ class SysVfioIfc(SysPciUserspaceDevice):
         # Get IOMMU info
         iommu_get_info = VfioIommuGetInfo()
         iommu_get_info.ioctl(self.container_fd)
+
+        # Save page sizes
+        self.iova_pgsizes = iommu_get_info.iova_pgsizes
+
+        # Figure out capabilities, only interested in iova ranges for now
+        self.iova_ranges = []
+        next_cap_offset = iommu_get_info.cap_offset
+        loops = 0
+        while next_cap_offset != 0:
+            cap_bytes = bytearray(iommu_get_info.caps[next_cap_offset - VfioIommuGetInfo.caps_offset:])
+            cap = VfioCapHeader.from_buffer(cap_bytes)
+            if cap.id == 0x01:
+                ranges = VfioCapIovaRanges.from_buffer(cap_bytes)
+                for i in range(ranges.nr_iovas):
+                    self.iova_ranges.append((ranges.ranges[i].start, ranges.ranges[i].end))
+            next_cap_offset = cap.next
+            loops += 1
+            assert loops < 1000, 'Stopping us from looping forever'
 
         # Get the device's fd
         dev_fd = VfioGetDeviceFd(string=self.pci_slot.encode())

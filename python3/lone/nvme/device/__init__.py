@@ -378,7 +378,7 @@ class NVMeDeviceCommon:
         # If there was data in, then grab it from PRPs and copy to
         #   the data in object
         if command.data_in is not None:
-            command.data_in = command.data_in_type.from_buffer(command.prp_in.get_data_buffer())
+            command.data_in = command.data_in_type.from_buffer(command.prp.get_data_buffer())
 
         # Consume the completion we just processed in the queue
         command.cq.consume_completion()
@@ -428,39 +428,47 @@ class NVMeDeviceCommon:
         # Return the qpair in which the command was posted
         return sqid, cqid
 
-    def alloc(self, command):
-        # Allocate memory that can be used with this device, direction dev to host
-        if hasattr(command, 'data_in_type') and command.data_in_type is not None:
+    def alloc(self, command, bytes_per_block=None):
+        set_buffer = False
 
-            # Allocate memory, set PRPs
-            prp = PRP(self.mem_mgr, len(command),
-                      self.mem_mgr.device.mps,
-                      DMADirection.DEVICE_TO_HOST,
-                      ' '.join([hex(id(command)), command.__class__.__name__]))
+        # Special handling for reads and writes
+        if command.__class__.__name__ == 'Write':
+            assert bytes_per_block is not None, 'Must pass in bytes_per_block for Write commands'
+            direction = DMADirection.HOST_TO_DEVICE
+            size = (command.NLB + 1) * bytes_per_block
 
-            # Set PRP
-            command.prp_in = prp
-            command.DPTR.PRP.PRP1 = prp.prp1
-            command.DPTR.PRP.PRP2 = prp.prp2
+        elif command.__class__.__name__ == 'Read':
+            assert bytes_per_block is not None, 'Must pass in bytes_per_block for Read commands'
 
-        # Allocate memory that can be used with this device, direction host to dev
-        if hasattr(command, 'data_out_type') and command.data_out_type is not None:
+            direction = DMADirection.DEVICE_TO_HOST
+            size = (command.NLB + 1) * bytes_per_block
 
-            # Allocate memory, set PRPs
-            prp = PRP(self.mem_mgr, len(command),
-                      self.mem_mgr.device.mps,
-                      DMADirection.HOST_TO_DEVICE,
-                      ' '.join([hex(id(command)), command.__class__.__name__]))
+        else:
+            # Not reads and writes
+            if hasattr(command, 'data_in_type') and command.data_in_type is not None:
+                direction = DMADirection.DEVICE_TO_HOST
+                size = len(command)
 
-            # Set PRP
-            command.prp_out = prp
-            command.DPTR.PRP.PRP1 = prp.prp1
-            command.DPTR.PRP.PRP2 = prp.prp2
+            if hasattr(command, 'data_out_type') and command.data_out_type is not None:
+                direction = DMADirection.HOST_TO_DEVICE
+                size = len(command)
+                set_buffer = True
 
+        # Allocate memory, set PRPs
+        prp = PRP(self.mem_mgr, size,
+                  self.mem_mgr.device.mps,
+                  direction,
+                  ' '.join([hex(id(command)), command.__class__.__name__]))
+
+        # Set PRP
+        command.prp = prp
+        command.DPTR.PRP.PRP1 = prp.prp1
+        command.DPTR.PRP.PRP2 = prp.prp2
+
+        if set_buffer:
             # Copy data out to it
             prp.set_data_buffer(bytes(command.data_out))
 
-        return command
 
     def __del__(self):
         # Disable when no more references to this exist. This helps in cases where

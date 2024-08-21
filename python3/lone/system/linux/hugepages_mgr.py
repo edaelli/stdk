@@ -7,6 +7,59 @@ import ctypes
 
 from lone.system import DevMemMgr, MemoryLocation, DMADirection
 
+class HugePagesIovaMgr:
+    ''' This class manages how IOVAs are assigned to memory
+        NOTE: Limits it to 2M requests
+    '''
+    def __init__(self, iova_ranges):
+        # iova ranges is a list of (start, stop) tuples for addresses
+        self.iova_ranges = iova_ranges
+        self.max_iovas = 1000
+
+        # To avoid a lot of processing allocating and deallocating iovas
+        #  of specific sizes, fix them all to 2Mb. May need to change if
+        #  the user wants more than that for a legitimate reason.
+        self.increment = (2 * 1024 * 1024)
+
+        # Reset ourselves at init
+        self.reset()
+
+    def reset(self):
+        self.free_iovas = []
+        
+        # Start from the first available value in the first range
+        range_index = 0
+        next_available_iova = self.iova_ranges[range_index][0]
+        max_range_iova = self.iova_ranges[range_index][1] - self.increment
+
+        # 0 is not really that great for an iova when debugging
+        if next_available_iova == 0:
+            next_available_iova = 0x23700000
+
+        for i in range(self.max_iovas):
+            self.free_iovas.append(next_available_iova)
+            next_available_iova += self.increment
+
+            # Make sure we don't go over the max for the range
+            if next_available_iova > max_range_iova:
+                range_index += 1
+                assert range_index < len(self.iova_ranges), 'Ran out of ranges!'
+                next_available_iova = self.iova_ranges[range_index][0]
+                max_range_iova = self.iova_ranges[range_index][1] - self.increment
+
+    def num_allocated_iovas(self):
+        return self.max_iovas - len(self.free_iovas)
+
+    def get(self, size):
+        assert size <= self.increment, f'IOVA max size is {self.increment}, requested {size}'
+        return self.free_iovas.pop(0)
+
+    def free(self, iova):
+        self.free_iovas.append(iova)
+
+    def used(self, iova):
+        self.free_iovas.remove(iova)
+
 
 class HugePagesMemoryMgr(DevMemMgr):
     ''' Uses hugepage backed memory but allocates and frees it in chunks of
@@ -26,6 +79,9 @@ class HugePagesMemoryMgr(DevMemMgr):
 
         # Keep track of memory given out on malloc calls
         self.malloc_mem = []
+
+        # The IOVA manager manages giving out IOVA for addresses
+        self.iova_mgr = HugePagesIovaMgr(self.device.pci_userspace_device.iova_ranges)
 
     def free_pages(self):
         return [p for p in self.pages if p.in_use is False]
