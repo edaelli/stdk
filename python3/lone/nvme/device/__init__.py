@@ -378,7 +378,7 @@ class NVMeDeviceCommon:
         # If there was data in, then grab it from PRPs and copy to
         #   the data in object
         if command.data_in is not None:
-            command.data_in = command.data_in_type.from_buffer(command.prp.get_data_buffer())
+            command.data_in = command.data_in_type.from_buffer_copy(command.prp.get_data_buffer())
 
         # Consume the completion we just processed in the queue
         command.cq.consume_completion()
