@@ -4,7 +4,7 @@ from lone.nvme.spec.structures import ADMINCommand, DataInCommon
 from lone.nvme.spec.commands.status_codes import NVMeStatusCode, status_codes
 
 
-class GetLogPage:
+class GetLogPage(ADMINCommand):
     _pack_ = 1
     _fields_ = [
         ('LID', ctypes.c_uint32, 8),
