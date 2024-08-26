@@ -1,6 +1,6 @@
 import ctypes
 import enum
-from lone.nvme.spec.structures import ADMINCommand, DataInCommon,
+from lone.nvme.spec.structures import ADMINCommand, DataInCommon
 from lone.nvme.spec.commands.status_codes import NVMeStatusCode, status_codes
 
 
