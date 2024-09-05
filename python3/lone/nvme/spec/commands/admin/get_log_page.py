@@ -41,7 +41,8 @@ status_codes.add([
 def GetLogPageFactory(name, lid, data_in_type):
     # Get the GetLogPage defaults and update them with
     #  LID and NUMDL/H
-    defaults = GetLogPage._defaults_
+    import copy
+    defaults = copy.deepcopy(GetLogPage._defaults_)
     defaults['LID'] = lid
     num_dw = int(ctypes.sizeof(data_in_type) / 4) - 1
     defaults['NUMDL'] = num_dw & 0xFFFF
@@ -259,14 +260,15 @@ class GetLogPageCommandsSupportedAndEffectsData(DataInCommon):
     class CommandsSupportedAndEffects(ctypes.Structure):
         _pack_ = 1
         _fields_ = [
-            ('CSUP', ctypes.c_uint32, 1),
+            ('CSUPP', ctypes.c_uint32, 1),
             ('LBCC', ctypes.c_uint32, 1),
             ('NCC', ctypes.c_uint32, 1),
             ('NIC', ctypes.c_uint32, 1),
             ('CCC', ctypes.c_uint32, 1),
-            ('RSVD_0', ctypes.c_uint32, 11),
+            ('RSVD_0', ctypes.c_uint32, 9),
+            ('CSER', ctypes.c_uint32, 2),
             ('CSE', ctypes.c_uint32, 3),
-            ('UUID', ctypes.c_uint32, 1),
+            ('USS', ctypes.c_uint32, 1),
             ('CSP', ctypes.c_uint32, 12),
         ]
 
