@@ -69,10 +69,6 @@ class NVMeDeviceCommon:
         self.sq_entry_size = sq_entry_size
         self.cq_entry_size = cq_entry_size
 
-        # Base class must create and initialize the pci_regs before
-        #   calling this init
-        self.pcie_regs.init_capabilities()
-
         # CID manager
         self.cid_mgr = CidMgr()
 
@@ -521,7 +517,10 @@ class NVMeDevicePhysical(NVMeDeviceCommon):
     def __init__(self, pci_slot):
         # Create a pci_userspace_device, then get pcie and nvme regs
         pci_userspace_device = System.PciUserspaceDevice(pci_slot)
+
         pci_regs = pci_userspace_device.pci_regs()
+        pci_regs.init_capabilities()
+
         nvme_regs = pci_userspace_device.nvme_regs()
 
         # Figure out our MPS to use with the memory manager

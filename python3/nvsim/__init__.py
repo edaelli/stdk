@@ -155,6 +155,7 @@ class NVMeSimulator(NVMeDeviceCommon):
         # Create the object to access PCIe registers, and init cababilities
         pcie_regs = PCIeRegistersDirect()
         self.initialize_pcie_caps(pcie_regs)
+        pcie_regs.init_capabilities()
 
         # Create the object to access NVMe registers
         nvme_regs = NVMeRegistersDirect()

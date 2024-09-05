@@ -1,4 +1,3 @@
-import enum
 from types import SimpleNamespace
 
 from lone.nvme.spec.commands.admin.identify import (IdentifyController,
@@ -9,13 +8,6 @@ from lone.nvme.spec.commands.status_codes import NVMeStatusCodeException
 
 import logging
 logger = logging.getLogger('nvme_device')
-
-
-class NVMeDeviceIntType(enum.Enum):
-    POLLING = 0
-    INTX = 1
-    MSI = 2
-    MSIX = 3
 
 
 class NVMeDeviceIdentifyData:
