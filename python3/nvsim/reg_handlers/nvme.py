@@ -3,7 +3,6 @@ import ctypes
 import time
 
 from lone.nvme.spec.queues import QueueMgr, NVMeSubmissionQueue, NVMeCompletionQueue
-from lone.nvme.device import NVMeDeviceCommon
 from lone.system import MemoryLocation
 from nvsim.cmd_handlers.admin import admin_handlers
 from nvsim.cmd_handlers.nvm import nvm_handlers
@@ -82,13 +81,15 @@ class NVMeRegChangeHandler:
             # Create and check queue memory address
             asq_mem = MemoryLocation(nvme_regs.ASQ.ASQB,
                                      nvme_regs.ASQ.ASQB,
-                                     (nvme_regs.AQA.ASQS + 1) * NVMeDeviceCommon.sq_entry_size,
+                                     ((nvme_regs.AQA.ASQS + 1) *
+                                         self.nvsim_state.nvme_device.sq_entry_size),
                                      'nvsim_asq')
             self.nvsim_state.check_mem_access(asq_mem)
 
             acq_mem = MemoryLocation(nvme_regs.ACQ.ACQB,
                                      nvme_regs.ACQ.ACQB,
-                                     (nvme_regs.AQA.ACQS + 1) * NVMeDeviceCommon.cq_entry_size,
+                                     ((nvme_regs.AQA.ACQS + 1) *
+                                         self.nvsim_state.nvme_device.cq_entry_size),
                                      'nvsim_acq')
             self.nvsim_state.check_mem_access(acq_mem)
 
@@ -97,13 +98,13 @@ class NVMeRegChangeHandler:
                 NVMeSubmissionQueue(
                     asq_mem,
                     nvme_regs.AQA.ASQS + 1,
-                    NVMeDeviceCommon.sq_entry_size,
+                    self.nvsim_state.nvme_device.sq_entry_size,
                     0,
                     ctypes.addressof(self.nvsim_state.nvme_regs.SQNDBS[0])),
                 NVMeCompletionQueue(
                     acq_mem,
                     nvme_regs.AQA.ACQS + 1,
-                    NVMeDeviceCommon.cq_entry_size,
+                    self.nvsim_state.nvme_device.cq_entry_size,
                     0,
                     ctypes.addressof(self.nvsim_state.nvme_regs.SQNDBS[0]) + 4))
 

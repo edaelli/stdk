@@ -67,11 +67,21 @@ class HugePagesMemoryMgr(DevMemMgr):
         a certain page size.
     '''
 
-    def __init__(self, device):
-        # Initialize parent
-        super().__init__(device)
+    def __init__(self,
+                 page_size,
+                 map_read_func,
+                 map_write_func,
+                 unmap_func,
+                 iova_ranges):
+        self.page_size = page_size
+        self.map_read_func = map_read_func
+        self.map_write_func = map_write_func
+        self.unmap_func = unmap_func
 
-        # NOTE: device must implement the SysPciUserspaceDevice interface
+        # Initialize parent
+        super().__init__(page_size)
+
+        # Create HugePagesMemory object
         self.hugepages_memory = HugePagesMemory(self.page_size)
 
         # Allocate one huge page initially
@@ -82,7 +92,7 @@ class HugePagesMemoryMgr(DevMemMgr):
         self.malloc_mem = []
 
         # The IOVA manager manages giving out IOVA for addresses
-        self.iova_mgr = HugePagesIovaMgr(self.device.pci_userspace_device.iova_ranges)
+        self.iova_mgr = HugePagesIovaMgr(iova_ranges)
 
     def free_pages(self):
         return [p for p in self.pages if p.in_use is False]
@@ -171,18 +181,18 @@ class HugePagesMemoryMgr(DevMemMgr):
         # Add to our tracking list
         self.malloc_mem.append(ret_mem)
 
-        # Map it with the device
+        # Map it
         self.map_iova(ret_mem, direction)
 
         # Return it!
         return ret_mem
 
     def map_iova(self, mem, direction):
-        # Map the vaddr to an iova with the device
+        # Map the vaddr to an iova
         if direction == DMADirection.HOST_TO_DEVICE:
-            self.device.pci_userspace_device.map_dma_region_read(mem.vaddr, mem.iova, mem.size)
+            self.map_read_func(mem.vaddr, mem.iova, mem.size)
         elif direction == DMADirection.DEVICE_TO_HOST:
-            self.device.pci_userspace_device.map_dma_region_write(mem.vaddr, mem.iova, mem.size)
+            self.map_write_func(mem.vaddr, mem.iova, mem.size)
         else:
             assert False, 'Direction {} not yet supported!'.format(direction)
 
@@ -224,9 +234,9 @@ class HugePagesMemoryMgr(DevMemMgr):
         memory.in_use = False
         memory.size = self.page_size
 
-        # Unmap the iova with the device
+        # Unmap the iova
         assert memory.iova_mapped is True
-        self.device.pci_userspace_device.unmap_dma_region(memory.iova, memory.size)
+        self.unmap_func(memory.iova, memory.size)
         memory.iova_mapped = False
 
         # Free the iova used for this memory

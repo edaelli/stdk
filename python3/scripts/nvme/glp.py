@@ -1,10 +1,6 @@
-import sys
-import os
 import argparse
-import time
 
 from lone.nvme.device import NVMeDevicePhysical
-from lone.nvme.spec.commands.admin.identify import IdentifyUUIDList
 from lone.nvme.spec.commands.admin.get_log_page import GetLogPageCommandsSupportedAndEffects
 
 
@@ -35,4 +31,3 @@ if __name__ == '__main__':
 
         for i in range(256):
             print(f'NVM   Command OPC: 0x{i:04x} CSUPP: {glp_cmd.data_in.IOCS[i].CSUPP}')
-

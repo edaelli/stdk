@@ -5,9 +5,11 @@ import ctypes
 # lone imports
 from lone.nvme.device import NVMeDevice
 
+
 if not (sys.version_info.major == 3 and sys.version_info.minor >= 11):
     print('Python 3.11 is required to run this script (uses os.eventfd)')
     sys.exit(-1)
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -75,7 +77,8 @@ def main():
     from lone.system import DMADirection
 
     # Create and map PRP for the read
-    read_prp = PRP(nvme_device.mem_mgr, 4096, nvme_device.mps, DMADirection.DEVICE_TO_HOST, 'read_prp')
+    read_prp = PRP(nvme_device.mem_mgr, 4096, nvme_device.mps,
+                   DMADirection.DEVICE_TO_HOST, 'read_prp')
 
     # Create command, set PRP
     read_cmd = Read(NSID=1, NLB=0)

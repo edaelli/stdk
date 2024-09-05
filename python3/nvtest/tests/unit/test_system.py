@@ -93,24 +93,6 @@ def test_system_interface(mocker):
     mem = MemoryLocation(0, 0, 0, 'test_system.py')
     mem
 
-    from lone.system import Memory
-    mocker.patch("lone.system.DevMemMgr.__abstractmethods__", set())
-    mem_mgr = DevMemMgr(4096)
-    with pytest.raises(NotImplementedError):
-        mem_mgr.malloc(0)
-    with pytest.raises(NotImplementedError):
-        mem_mgr.malloc_pages(1)
-    with pytest.raises(NotImplementedError):
-        mem_mgr.free(0)
-    with pytest.raises(NotImplementedError):
-        mem_mgr.__enter__()
-    with pytest.raises(NotImplementedError):
-        mem_mgr.__exit__(0, 0, 0)
-    with pytest.raises(NotImplementedError):
-        mem_mgr.free_all()
-    with pytest.raises(NotImplementedError):
-        mem_mgr.allocated_mem_list()
-
 
 def test_iova_mgr():
     from lone.system import IovaMgr

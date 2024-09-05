@@ -31,6 +31,7 @@ setup(name='lone',
       packages=find_packages(),
       zip_safe=False,
       install_requires=[
+          'setuptools',
           'wheel',
           'tox',
           'ioctl_opt',

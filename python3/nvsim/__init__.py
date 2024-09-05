@@ -17,16 +17,13 @@ logger = logging.getLogger('nvsim_thread')
 
 
 class NVSimThread(threading.Thread):
-    def __init__(self, nvme_device, pcie_regs, nvme_regs, mem_mgr):
+    def __init__(self, nvme_device):
         threading.Thread.__init__(self)
         self.stop_event = threading.Event()
         self.exception = None
 
         self.nvme_device = nvme_device
-        self.pcie_regs = pcie_regs
-        self.nvme_regs = nvme_regs
-
-        self.nvsim_state = NVSimState(pcie_regs, nvme_regs, mem_mgr, nvme_device.injectors)
+        self.nvsim_state = NVSimState(nvme_device)
         self.pcie_handler = PCIeRegChangeHandler(self.nvsim_state)
         self.nvme_handler = NVMeRegChangeHandler(self.nvsim_state)
 
@@ -43,7 +40,7 @@ class NVSimThread(threading.Thread):
             except Exception as e:
                 logger.exception('NVSimThread EXCEPTION!')
                 self.exception = e
-                self.nvme_regs.CSTS.CFS = 1
+                self.nvme_device.nvme_regs.CSTS.CFS = 1
                 break
 
             # Exit if the main thread is not alive anymore
@@ -69,14 +66,13 @@ class NVMeSimulator(NVMeDeviceCommon):
     class SimMemMgr(DevMemMgr):
         ''' Simulated memory implemenation
         '''
-        def __init__(self, device):
+        def __init__(self, page_size):
             ''' Initializes a memory manager
             '''
-            self.device = device
-            self.page_size = device.mps
+            self.page_size = page_size
             self._allocated_mem_list = []
 
-            #TODO: Clean this up
+            # TODO: Clean this up
             self.iova_mgr = SimpleNamespace(reset=lambda: True)
 
         def malloc(self, size, direction, client=None):
@@ -115,38 +111,38 @@ class NVMeSimulator(NVMeDeviceCommon):
         def allocated_mem_list(self):
             return self._allocated_mem_list
 
-    def initialize_pcie_caps(self):
-        self.pcie_regs.CAP.CP = type(self.pcie_regs).CAPS.offset
-        next_ptr = self.pcie_regs.CAP.CP
-        next_addr = ctypes.addressof(self.pcie_regs) + next_ptr
+    def initialize_pcie_caps(self, pcie_regs):
+        pcie_regs.CAP.CP = type(pcie_regs).CAPS.offset
+        next_ptr = pcie_regs.CAP.CP
+        next_addr = ctypes.addressof(pcie_regs) + next_ptr
 
         # Make one of every cap we know of for the simulator
-        for t in [self.pcie_regs.PCICapPowerManagementInterface,
-                  self.pcie_regs.PCICapMSI,
-                  self.pcie_regs.PCICapExpress,
-                  self.pcie_regs.PCICapMSIX,
-                  self.pcie_regs.PCICapabilityUnknown]:
+        for t in [pcie_regs.PCICapPowerManagementInterface,
+                  pcie_regs.PCICapMSI,
+                  pcie_regs.PCICapExpress,
+                  pcie_regs.PCICapMSIX,
+                  pcie_regs.PCICapabilityUnknown]:
             c = t.from_address(next_addr)
             c.CAP_ID = type(c)._cap_id_
             next_ptr += ctypes.sizeof(c)
             next_addr += ctypes.sizeof(c)
-            if type(c) is self.pcie_regs.PCICapabilityUnknown:
+            if type(c) is pcie_regs.PCICapabilityUnknown:
                 c.NEXT_PTR = 0
             else:
                 c.NEXT_PTR = next_ptr
 
         next_ptr = 0x100
-        next_addr = ctypes.addressof(self.pcie_regs) + next_ptr
+        next_addr = ctypes.addressof(pcie_regs) + next_ptr
 
         # Now for extended caps
-        for t in [self.pcie_regs.PCICapExtendedAer,
-                  self.pcie_regs.PCICapExtendeDeviceSerialNumber,
-                  self.pcie_regs.PCICapabilityExtUnknown]:
+        for t in [pcie_regs.PCICapExtendedAer,
+                  pcie_regs.PCICapExtendeDeviceSerialNumber,
+                  pcie_regs.PCICapabilityExtUnknown]:
             c = t.from_address(next_addr)
             c.CAP_ID = type(c)._cap_id_
             next_ptr += ctypes.sizeof(c)
             next_addr += ctypes.sizeof(c)
-            if type(c) is self.pcie_regs.PCICapabilityExtUnknown:
+            if type(c) is pcie_regs.PCICapabilityExtUnknown:
                 c.NEXT_PTR = 0
             else:
                 c.NEXT_PTR = next_ptr
@@ -155,25 +151,27 @@ class NVMeSimulator(NVMeDeviceCommon):
         assert pci_slot == 'nvsim', (
             'Trying to instantiate simulator with {} for pci_slot'.format(pci_slot))
         self.sim_thread_started = False
-        self.pci_slot = pci_slot
 
         # Create the object to access PCIe registers, and init cababilities
-        self.pcie_regs = PCIeRegistersDirect()
-        self.initialize_pcie_caps()
-        self.pcie_regs.init_capabilities()
+        pcie_regs = PCIeRegistersDirect()
+        self.initialize_pcie_caps(pcie_regs)
 
         # Create the object to access NVMe registers
-        self.nvme_regs = NVMeRegistersDirect()
-
-        # Initialize common
-        super().__init__()
+        nvme_regs = NVMeRegistersDirect()
 
         # Create our memory manager
-        self.mem_mgr = NVMeSimulator.SimMemMgr(self)
-        self.queue_mem = []
+        self.mps = 4096
+        mem_mgr = NVMeSimulator.SimMemMgr(self.mps)
+
+        # Initialize NVMeDeviceCommon
+        super().__init__(pci_slot,
+                         None,
+                         pcie_regs,
+                         nvme_regs,
+                         mem_mgr)
 
         # Start the simulator thread
-        self.sim_thread = NVSimThread(self, self.pcie_regs, self.nvme_regs, self.mem_mgr)
+        self.sim_thread = NVSimThread(self)
         self.sim_thread.daemon = True
         self.sim_thread.start()
         logger.info('NVSimThread started')

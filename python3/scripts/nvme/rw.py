@@ -60,7 +60,8 @@ def main():
     nlb = num_blocks - 1
 
     # Create and map PRP for the write
-    write_prp = PRP(nvme_device.mem_mgr, xfer_len, nvme_device.mps, DMADirection.HOST_TO_DEVICE, 'write_prp')
+    write_prp = PRP(nvme_device.mem_mgr, xfer_len,
+                    nvme_device.mps, DMADirection.HOST_TO_DEVICE, 'write_prp')
 
     # Create command, set PRP, fill in data
     write_cmd = Write(NSID=args.namespace, NLB=nlb)
@@ -79,7 +80,8 @@ def main():
         nvme_device.sync_cmd(write_cmd, timeout_s=1)
 
     # Create and map PRP for the read
-    read_prp = PRP(nvme_device.mem_mgr, xfer_len, nvme_device.mps, DMADirection.DEVICE_TO_HOST, 'read_prp')
+    read_prp = PRP(nvme_device.mem_mgr, xfer_len,
+                   nvme_device.mps, DMADirection.DEVICE_TO_HOST, 'read_prp')
 
     # Create command, set PRP
     read_cmd = Read(NSID=args.namespace, NLB=nlb)

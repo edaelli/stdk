@@ -193,11 +193,10 @@ class MemoryLocation:
 class DevMemMgr(metaclass=abc.ABCMeta):
     ''' Base DevMemMgr interface object
     '''
-    def __init__(self, device):
+    def __init__(self, page_size):
         ''' Initializes a DevMemMgr manager
         '''
-        self.device = device
-        self.page_size = device.mps
+        self.page_size = page_size
         self.iova_mgr = IovaMgr(0xDED00000)
 
     @abc.abstractmethod

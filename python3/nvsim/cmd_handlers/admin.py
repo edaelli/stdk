@@ -5,7 +5,6 @@ from nvsim.cmd_handlers import NvsimCommandHandlers
 from lone.nvme.spec.prp import PRP
 from lone.nvme.spec.commands.status_codes import status_codes
 from lone.system import MemoryLocation
-from lone.nvme.device import NVMeDeviceCommon
 from lone.nvme.spec.queues import NVMeSubmissionQueue, NVMeCompletionQueue
 
 from lone.nvme.spec.commands.admin.identify import (Identify,
@@ -84,7 +83,7 @@ class NVSimCreateIOCompletionQueue:
         # Create the memory object for the queue location
         q_mem = MemoryLocation(ccq_cmd.DPTR.PRP.PRP1,
                                ccq_cmd.DPTR.PRP.PRP1,
-                               (ccq_cmd.QSIZE + 1) * NVMeDeviceCommon.cq_entry_size,
+                               (ccq_cmd.QSIZE + 1) * nvsim_state.nvme_device.cq_entry_size,
                                'nvsim_iocq')
 
         # Make sure we can access the queue memory before actually doing it
@@ -93,7 +92,7 @@ class NVSimCreateIOCompletionQueue:
         # Add IO queue to nvsim_state's queue mgr
         new_cq = NVMeCompletionQueue(q_mem,
                                      ccq_cmd.QSIZE + 1,
-                                     NVMeDeviceCommon.cq_entry_size,
+                                     nvsim_state.nvme_device.cq_entry_size,
                                      ccq_cmd.QID,
                                      (ctypes.addressof(
                                          nvsim_state.nvme_regs.SQNDBS[0]) +
@@ -115,7 +114,7 @@ class NVSimCreateIOSubmissionQueue:
         # Create the memory object for the queue location
         q_mem = MemoryLocation(csq_cmd.DPTR.PRP.PRP1,
                                csq_cmd.DPTR.PRP.PRP1,
-                               (csq_cmd.QSIZE + 1) * NVMeDeviceCommon.sq_entry_size,
+                               (csq_cmd.QSIZE + 1) * nvsim_state.nvme_device.sq_entry_size,
                                'nvsim_iosq')
 
         # Make sure we can access the queue memory before actually doing it
@@ -124,7 +123,7 @@ class NVSimCreateIOSubmissionQueue:
         # Create the sq object
         new_sq = NVMeSubmissionQueue(q_mem,
                                      csq_cmd.QSIZE + 1,
-                                     NVMeDeviceCommon.sq_entry_size,
+                                     nvsim_state.nvme_device.sq_entry_size,
                                      csq_cmd.QID,
                                      (ctypes.addressof(
                                          nvsim_state.nvme_regs.SQNDBS[0]) +

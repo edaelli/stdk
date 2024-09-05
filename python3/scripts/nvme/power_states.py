@@ -1,10 +1,9 @@
-import sys
-import os
 import argparse
 
 from lone.nvme.device import NVMeDevicePhysical
 from lone.nvme.spec.commands.admin.identify import IdentifyController
-from lone.nvme.spec.commands.admin.get_set_feature import (GetFeaturePowerManagement, SetFeaturePowerManagement)
+from lone.nvme.spec.commands.admin.get_set_feature import (GetFeaturePowerManagement,
+                                                           SetFeaturePowerManagement)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -41,7 +40,8 @@ if __name__ == '__main__':
         print('User requested a change in power state')
 
         power_scale = 0.01 if id_ctrl_data.PSDS[args.set_ps].MXPS == 0 else 0.0001
-        print(f'  Setting PS to: {args.set_ps}: {id_ctrl_data.PSDS[args.set_ps].MP * power_scale} Watts')
+        print(f'  Setting PS to: {args.set_ps}: '
+              f'{id_ctrl_data.PSDS[args.set_ps].MP * power_scale} Watts')
 
         # Set it
         sf_pm = SetFeaturePowerManagement(PS=args.set_ps, SV=args.set_ps_save)
@@ -52,4 +52,5 @@ if __name__ == '__main__':
         nvme_device.sync_cmd(gf_pm)
         gf_data = gf_pm.response(gf_pm.cqe)
         power_scale = 0.01 if id_ctrl_data.PSDS[gf_data.PS].MXPS == 0 else 0.0001
-        print(f'  Current Power State: {gf_data.PS}: {id_ctrl_data.PSDS[gf_data.PS].MP * power_scale} Watts')
+        print(f'  Current Power State: {gf_data.PS}: '
+              f'{id_ctrl_data.PSDS[gf_data.PS].MP * power_scale} Watts')

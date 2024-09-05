@@ -24,35 +24,57 @@ class NVMeDeviceIntType(enum.Enum):
     MSIX = 3
 
 
-class NVMeDeviceCommon:
-    sq_entry_size = 64
-    cq_entry_size = 16
+class CidMgr:
+    ''' Manager class to track CID values for NVMe commands
+        TODO: Need to add tracking and checks to forbid allocating
+        a sqid/cid pair that is currently outstanding. Not an issue
+        unless the user is sending more than max_value - init_value
+        commands at a time.
+    '''
+    def __init__(self, init_value=0x1000, max_value=0xFFFE):
+        self.init_value = init_value
+        self.max_value = max_value
+        self.value = self.init_value
 
-    class CidMgr:
-        def __init__(self, init_value=0x1000, max_value=0xFFFE):
-            self.init_value = init_value
-            self.max_value = max_value
+    def alloc(self):
+        # Get next value
+        value = self.value
+
+        # Increment and wrap if needed
+        self.value = self.value + 1
+        if self.value >= self.max_value:
             self.value = self.init_value
 
-        def get(self):
-            value = self.value
+        # Return it
+        return value
 
-            self.value = self.value + 1
-            if self.value >= self.max_value:
-                self.value = self.init_value
 
-            return value
+class NVMeDeviceCommon:
 
-    def __init__(self):
+    def __init__(self,
+                 pci_slot,
+                 pci_userspace_device,
+                 pcie_regs,
+                 nvme_regs,
+                 mem_mgr,
+                 sq_entry_size=64,
+                 cq_entry_size=16):
+
+        # Save values passed in
+        self.pci_slot = pci_slot
+        self.pci_userspace_device = pci_userspace_device
+        self.pcie_regs = pcie_regs
+        self.nvme_regs = nvme_regs
+        self.mem_mgr = mem_mgr
+        self.sq_entry_size = sq_entry_size
+        self.cq_entry_size = cq_entry_size
+
         # Base class must create and initialize the pci_regs before
         #   calling this init
         self.pcie_regs.init_capabilities()
 
-        #  Store our MPS for easy access
-        self.mps = 2 ** (12 + self.nvme_regs.CC.MPS)
-
         # CID manager
-        self.cid_mgr = NVMeDeviceCommon.CidMgr()
+        self.cid_mgr = CidMgr()
 
         # NVMe Queue manager
         self.queue_mgr = QueueMgr()
@@ -148,12 +170,12 @@ class NVMeDeviceCommon:
         self.queue_mgr.add(NVMeSubmissionQueue(
                            asq_mem,
                            asq_entries,
-                           NVMeDeviceCommon.sq_entry_size,
+                           self.sq_entry_size,
                            0,
                            ctypes.addressof(self.nvme_regs.SQNDBS[0])),
                            NVMeCompletionQueue(acq_mem,
                            acq_entries,
-                           NVMeDeviceCommon.cq_entry_size,
+                           self.cq_entry_size,
                            0,
                            ctypes.addressof(self.nvme_regs.SQNDBS[0]) + 4,
                            0))
@@ -208,13 +230,13 @@ class NVMeDeviceCommon:
         self.queue_mgr.add(NVMeSubmissionQueue(
                            sq_mem,
                            sq_entries,
-                           NVMeDeviceCommon.sq_entry_size,
+                           self.sq_entry_size,
                            sq_id,
                            ctypes.addressof(self.nvme_regs.SQNDBS[0]) + (sq_id * 8)),
                            NVMeCompletionQueue(
                            cq_mem,
                            cq_entries,
-                           NVMeDeviceCommon.cq_entry_size,
+                           self.cq_entry_size,
                            cq_id,
                            ctypes.addressof(self.nvme_regs.SQNDBS[0]) + ((cq_id * 8) + 4),
                            cq_iv),
@@ -261,7 +283,7 @@ class NVMeDeviceCommon:
     def post_command(self, command):
 
         # Set a CID for the command
-        command.CID = self.cid_mgr.get()
+        command.CID = self.cid_mgr.alloc()
 
         # Post the command on the next available sq slot
         command.sq.post_command(command)
@@ -456,7 +478,7 @@ class NVMeDeviceCommon:
 
         # Allocate memory, set PRPs
         prp = PRP(self.mem_mgr, size,
-                  self.mem_mgr.device.mps,
+                  self.mem_mgr.page_size,
                   direction,
                   ' '.join([hex(id(command)), command.__class__.__name__]))
 
@@ -473,7 +495,11 @@ class NVMeDeviceCommon:
         # Disable when no more references to this exist. This helps in cases where
         #   we see an exception but the drive is still reading/writing to/from pci memory.
         #   Disabling here hopefully tells the drive it is not allowed to use pci memory anymore
-        self.cc_disable()
+        try:
+            self.cc_disable()
+        except Exception:
+            # Best effort, if something goes wrong, just ignore it!
+            pass
 
 
 def NVMeDevice(pci_slot):
@@ -493,24 +519,27 @@ class NVMeDevicePhysical(NVMeDeviceCommon):
           pcie bus via vfio
     '''
     def __init__(self, pci_slot):
-        # Save off our slot
-        self.pci_slot = pci_slot
+        # Create a pci_userspace_device, then get pcie and nvme regs
+        pci_userspace_device = System.PciUserspaceDevice(pci_slot)
+        pci_regs = pci_userspace_device.pci_regs()
+        nvme_regs = pci_userspace_device.nvme_regs()
 
-        # Create the PCI Userspace device interface object
-        self.pci_userspace_device = System.PciUserspaceDevice(pci_slot)
+        # Figure out our MPS to use with the memory manager
+        self.mps = 2 ** (12 + nvme_regs.CC.MPS)
 
-        # Create the object to access PCIe registers
-        self.pcie_regs = self.pci_userspace_device.pci_regs()
+        # Memory manager
+        mem_mgr = System.DevMemMgr(self.mps,
+                                   pci_userspace_device.map_dma_region_read,
+                                   pci_userspace_device.map_dma_region_write,
+                                   pci_userspace_device.unmap_dma_region,
+                                   pci_userspace_device.iova_ranges)
 
-        # Create the object to access NVMe registers
-        self.nvme_regs = self.pci_userspace_device.nvme_regs()
-
-        # Initialize common
-        super().__init__()
-
-        # Memory manager that works with this device. Initialize after common
-        #  because it needs device.mps
-        self.mem_mgr = System.DevMemMgr(self)
+        # Initialize NVMeDeviceCommon
+        super().__init__(pci_slot,
+                         pci_userspace_device,
+                         pci_regs,
+                         nvme_regs,
+                         mem_mgr)
 
     def init_msix_interrupts(self, num_vectors, start=0):
         self.num_msix_vectors = start + num_vectors
