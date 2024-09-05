@@ -469,12 +469,12 @@ class NVMeDeviceCommon:
             # Copy data out to it
             prp.set_data_buffer(bytes(command.data_out))
 
-
     def __del__(self):
         # Disable when no more references to this exist. This helps in cases where
         #   we see an exception but the drive is still reading/writing to/from pci memory.
         #   Disabling here hopefully tells the drive it is not allowed to use pci memory anymore
         self.cc_disable()
+
 
 def NVMeDevice(pci_slot):
     ''' Helper function to allow tests/modules/etc to pick a physical or simulated

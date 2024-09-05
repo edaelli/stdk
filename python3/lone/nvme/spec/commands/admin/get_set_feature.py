@@ -1,7 +1,7 @@
 import copy
 import ctypes
 import enum
-from lone.nvme.spec.structures import ADMINCommand, DataInCommon
+from lone.nvme.spec.structures import ADMINCommand
 from lone.nvme.spec.commands.status_codes import NVMeStatusCode, status_codes
 
 
@@ -78,10 +78,9 @@ def FeatureFactory(feature_info, data_in=None, data_out=None):
               GetFeature._fields_2_)
 
     # Create the class
-    get_cls = type(f'Get{feature_info.__name__}', (ADMINCommand,),
-               {'_fields_': fields,
-                '_defaults_': defaults,
-          })
+    get_cls = type(f'Get{feature_info.__name__}', (ADMINCommand,), {
+        '_fields_': fields,
+        '_defaults_': defaults, })
 
     # Add status codes
     for code, string in get_feature_status_codes:
@@ -103,10 +102,9 @@ def FeatureFactory(feature_info, data_in=None, data_out=None):
               SetFeature._fields_2_)
 
     # Create the class
-    set_cls = type(f'Set{feature_info.__name__}', (ADMINCommand,),
-               {'_fields_': fields,
-                '_defaults_': defaults,
-          })
+    set_cls = type(f'Set{feature_info.__name__}', (ADMINCommand,), {
+        '_fields_': fields,
+        '_defaults_': defaults, })
 
     # Add status codes
     for code, string in set_feature_status_codes:
@@ -160,4 +158,3 @@ class FeaturePowerManagement(ctypes.Structure):
 
 
 GetFeaturePowerManagement, SetFeaturePowerManagement = FeatureFactory(FeaturePowerManagement)
-

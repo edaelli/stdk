@@ -7,6 +7,7 @@ import ctypes
 
 from lone.system import DevMemMgr, MemoryLocation, DMADirection
 
+
 class HugePagesIovaMgr:
     ''' This class manages how IOVAs are assigned to memory
         NOTE: Limits it to 2M requests
@@ -26,7 +27,7 @@ class HugePagesIovaMgr:
 
     def reset(self):
         self.free_iovas = []
-        
+
         # Start from the first available value in the first range
         range_index = 0
         next_available_iova = self.iova_ranges[range_index][0]

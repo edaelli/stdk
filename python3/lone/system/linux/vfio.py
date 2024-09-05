@@ -136,7 +136,6 @@ class vfioDeviceReset(VfioIoctl):
     _ioctl_ = 11
 
 
-
 class VfioCapHeader(ctypes.Structure):
     _fields_ = [
         ('id', ctypes.c_uint16),
@@ -144,11 +143,13 @@ class VfioCapHeader(ctypes.Structure):
         ('next', ctypes.c_uint32),
     ]
 
+
 class VfioIovaRange(ctypes.Structure):
     _fields_ = [
         ('start', ctypes.c_uint64),
         ('end', ctypes.c_uint64),
     ]
+
 
 class VfioCapIovaRanges(ctypes.Structure):
     _fields_ = [
@@ -157,6 +158,7 @@ class VfioCapIovaRanges(ctypes.Structure):
         ('reserved', ctypes.c_uint32),
         ('ranges', 5 * VfioIovaRange),
     ]
+
 
 class VfioIommuGetInfo(VfioIoctl):
     _ioctl_ = 12
@@ -297,7 +299,8 @@ class SysVfioIfc(SysPciUserspaceDevice):
         next_cap_offset = iommu_get_info.cap_offset
         loops = 0
         while next_cap_offset != 0:
-            cap_bytes = bytearray(iommu_get_info.caps[next_cap_offset - VfioIommuGetInfo.caps_offset:])
+            cap_bytes = bytearray(
+                iommu_get_info.caps[next_cap_offset - VfioIommuGetInfo.caps_offset:])
             cap = VfioCapHeader.from_buffer(cap_bytes)
             if cap.id == 0x01:
                 ranges = VfioCapIovaRanges.from_buffer(cap_bytes)

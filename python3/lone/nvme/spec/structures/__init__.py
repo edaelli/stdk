@@ -3,7 +3,6 @@ import inspect
 
 from lone.util.struct_tools import StructFieldsIterator
 from lone.util.hexdump import hexdump
-from lone.system import DMADirection
 
 import logging
 logger = logging.getLogger('nvme_struct')

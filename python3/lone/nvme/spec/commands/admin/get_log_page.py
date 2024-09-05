@@ -49,10 +49,10 @@ def GetLogPageFactory(name, lid, data_in_type):
     defaults['NUMDH'] = num_dw >> 16
 
     # Create the class
-    cls = type(name, (ADMINCommand,),
-               {'_fields_': GetLogPage._fields_,
-                '_defaults_': defaults,
-          })
+    cls = type(name, (ADMINCommand,), {
+        '_fields_': GetLogPage._fields_,
+        '_defaults_': defaults,
+    })
 
     # Add data_in_type and size
     cls.data_in_type = data_in_type

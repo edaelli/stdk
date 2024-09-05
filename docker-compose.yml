@@ -13,7 +13,7 @@ services:
     hostname: LONE
 
     # Run with the lone_user user
-    user: lone_user:lone_user
+    user: lone_user:lone_group
 
     # Set some ENV variables
     environment:

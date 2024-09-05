@@ -38,7 +38,7 @@ class PRP:
             (self.pages_needed - 1) / self.prps_per_page) if self.pages_needed > 2 else 0
 
         # Allocate memory
-        if alloc == True:
+        if alloc is True:
             self.alloc(direction)
 
     def malloc_page(self, direction, client):
