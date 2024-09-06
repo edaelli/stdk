@@ -254,7 +254,7 @@ class NVMeDeviceCommon:
 
     def delete_io_queues(self):
 
-        # First delete all submission queuees
+        # First delete all submission queues
         for (sqid, cqid), (sq, cq) in self.queue_mgr.nvme_queues.items():
 
             # Never delete Admin queues
@@ -264,9 +264,10 @@ class NVMeDeviceCommon:
             # Delete IO submission queue
             del_sq_cmd = DeleteIOSubmissionQueue(QID=sqid)
             self.sync_cmd(del_sq_cmd, timeout_s=1)
+            self.queue_mgr.remove_sq(sqid)
 
-        # Then delete all completion queuees
-        for (sqid, cqid), (sq, cq) in self.queue_mgr.nvme_queues.items():
+        # Then delete all completion queues
+        for (sqid, cqid), (sq, cq) in list(self.queue_mgr.nvme_queues.items()):
 
             # Never delete Admin queues
             if sqid == 0 and cqid == 0:
@@ -275,6 +276,7 @@ class NVMeDeviceCommon:
             # Delete IO completion queue
             del_cq_cmd = DeleteIOCompletionQueue(QID=cqid)
             self.sync_cmd(del_cq_cmd, timeout_s=1)
+            self.queue_mgr.remove_cq(cqid)
 
     def post_command(self, command):
 
@@ -431,7 +433,9 @@ class NVMeDeviceCommon:
                 sqid = self.queue_mgr.next_iosq_id()
 
         # Get command queues
-        command.sq, command.cq = self.queue_mgr.get(sqid, cqid)
+        sq, cq = self.queue_mgr.get(sqid, cqid)
+        assert sq is not None and cq is not None, "No queue to send command to!"
+        command.sq, command.cq = sq, cq
 
         # Sanity checks
         assert (command.CID, command.sq.qid) not in self.outstanding_commands.keys(), (

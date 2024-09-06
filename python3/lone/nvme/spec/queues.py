@@ -129,6 +129,7 @@ class QueueMgr:
     def add(self, sq, cq):
         self.nvme_queues[sq.qid, cq.qid] = (sq, cq)
 
+        self.io_sqids = []
         self.io_cqids = []
         for k, v in self.nvme_queues.items():
             sqid, cqid = k
@@ -142,11 +143,28 @@ class QueueMgr:
             if cqid == rem_cqid:
                 assert sq is None, "Removing CQ with not None SQ! {}".format(cqid)
                 self.nvme_queues[(sqid, cqid)] = (sq, None)
+                self.io_cqids.remove(cqid)
+
+        # Now remove any that are None, None from our list
+        remove_qs = []
+        for (sqid, cqid), (sq, cq) in self.nvme_queues.items():
+            if self.nvme_queues[(sqid, cqid)] == (None, None):
+                remove_qs.append((sqid, cqid))
+        for (sqid, cqid) in remove_qs:
+            self.nvme_queues.pop((sqid, cqid))
 
     def remove_sq(self, rem_sqid):
         for (sqid, cqid), (sq, cq) in self.nvme_queues.items():
             if sqid == rem_sqid:
                 self.nvme_queues[(sqid, cqid)] = (None, cq)
+                self.io_sqids.remove(sqid)
+        # Now remove any that are None, None from our list
+        remove_qs = []
+        for (sqid, cqid), (sq, cq) in self.nvme_queues.items():
+            if self.nvme_queues[(sqid, cqid)] == (None, None):
+                remove_qs.append((sqid, cqid))
+        for (sqid, cqid) in remove_qs:
+            self.nvme_queues.pop((sqid, cqid))
 
     def get_cqs(self):
         cqs = []
@@ -175,7 +193,7 @@ class QueueMgr:
             try:
                 sq, cq = self.nvme_queues[(sqid, cqid)]
             except KeyError:
-                raise KeyError('SQID: {} CQIS: {} not a valid pair'.format(cqid, sqid))
+                raise KeyError('SQID: {} CQID: {} not a valid pair'.format(cqid, sqid))
 
         # Find first cqid associated with sqid
         elif sqid is not None and cqid is None:

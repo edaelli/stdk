@@ -1,4 +1,5 @@
 import pytest
+from types import SimpleNamespace
 
 from lone.nvme.spec.registers.pcie_regs import PCIeRegistersDirect
 from lone.nvme.spec.registers.nvme_regs import NVMeRegistersDirect
@@ -7,10 +8,14 @@ from lone.system import DevMemMgr, MemoryLocation
 
 from lone.nvme.device import CidMgr
 from lone.nvme.device import NVMeDeviceCommon, NVMeDeviceIntType
+from lone.nvme.spec.commands.admin.identify import IdentifyController
 
 
+####################################################################################################
+# pytest fixture for mocking an nvme device to be used in the testing below
+####################################################################################################
 @pytest.fixture(scope='function')
-def mocked_nvme_device(pytestconfig):
+def mocked_nvme_device(mocker):
     pcie_regs = PCIeRegistersDirect()
     nvme_regs = NVMeRegistersDirect()
 
@@ -37,10 +42,27 @@ def mocked_nvme_device(pytestconfig):
                                    pcie_regs, nvme_regs,
                                    MockedMemMgr(4096), 64, 16)
 
+    # Mock sync_cmd
+    def mocked_sync_cmd(command, sqid=None, cqid=None, timeout_s=10, check=True):
+        return
+
+    mocker.patch.object(nvme_device, 'sync_cmd', mocked_sync_cmd)
+
     yield nvme_device
 
     # Make sure that the disable when the nvme_device is deleted doesnt timeout
     nvme_device.nvme_regs.CSTS.RDY = 0
+
+
+####################################################################################################
+# pytest fixture for mocking an admin command that can be used in the tests below
+####################################################################################################
+@pytest.fixture(scope='function')
+def mocked_admin_id_cmd(mocker):
+    id_cmd = IdentifyController()
+    id_cmd.sq = SimpleNamespace(post_command=lambda x: True,
+                                qid=0)
+    yield id_cmd
 
 
 ####################################################################################################
@@ -169,41 +191,136 @@ def test_init_admin_queues(mocked_nvme_device):
     assert acq.qid == 0
 
 
-def test_create_io_queue_pair(mocked_nvme_device):
+def test_create_io_queue_pair(mocker, mocked_nvme_device):
     ''' def create_io_queue_pair(self,
                                  cq_entries, cq_id, cq_iv, cq_ien, cq_pc,
                                  sq_entries, sq_id, sq_prio, sq_pc, sq_setid):
     '''
-    # Must create admin queues before creating io queues
+    # Must create admin queues before creating io queues, verify one queue (admin) is created
     mocked_nvme_device.init_admin_queues(2, 2)
-    # This will segfault... Fix next!
-    # mocked_nvme_device.create_io_queue_pair(
-    # 1, 1, 0, 0, 1,
-    # 1, 1, 0, 1, 0)
+    assert len(mocked_nvme_device.queue_mgr.nvme_queues) == 1
+    # Make sure that we allocated 2 memory regions for each the sq and cq
+    assert len(mocked_nvme_device.mem_mgr.allocated_mem_list()) == 2
+
+    # Call it with parameters
+    mocked_nvme_device.create_io_queue_pair(1, 1, 0, 0, 1,
+                                            1, 1, 0, 1, 0)
+
+    # After calling, one more queue should be created, and we should have 1 cq and 1 sq
+    assert len(mocked_nvme_device.queue_mgr.nvme_queues) == 2
+    assert len(mocked_nvme_device.queue_mgr.io_sqids) == 1
+    assert len(mocked_nvme_device.queue_mgr.io_cqids) == 1
+    # Make sure that we allocated 2 more memory regions for each the sq and cq
+    assert len(mocked_nvme_device.mem_mgr.allocated_mem_list()) == 4
+
+    # Call it with parameters again to verify
+    mocked_nvme_device.create_io_queue_pair(1, 2, 0, 0, 1,
+                                            1, 2, 0, 1, 0)
+
+    # After calling, one more queue should be created, and we should have 1 cq and 1 sq
+    assert len(mocked_nvme_device.queue_mgr.nvme_queues) == 3
+    assert len(mocked_nvme_device.queue_mgr.io_sqids) == 2
+    assert len(mocked_nvme_device.queue_mgr.io_cqids) == 2
+    # Make sure that we allocated 2 more memory regions for each the sq and cq
+    assert len(mocked_nvme_device.mem_mgr.allocated_mem_list()) == 6
+
+    # Test the MSI-X path
+    mocked_nvme_device.int_type = NVMeDeviceIntType.MSIX
+    mocked_nvme_device.num_msix_vectors = 10
+    mocked_nvme_device.create_io_queue_pair(1, 3, 0, 0, 1,
+                                            1, 3, 0, 1, 0)
+    assert len(mocked_nvme_device.queue_mgr.nvme_queues) == 4
+    assert len(mocked_nvme_device.queue_mgr.io_sqids) == 3
+    assert len(mocked_nvme_device.queue_mgr.io_cqids) == 3
+    # Make sure that we allocated 2 more memory regions for each the sq and cq
+    assert len(mocked_nvme_device.mem_mgr.allocated_mem_list()) == 8
+
+    # Test the MSI-X path with vector too high
+    mocked_nvme_device.int_type = NVMeDeviceIntType.MSIX
+    mocked_nvme_device.num_msix_vectors = 1
+    with pytest.raises(Exception):
+        mocked_nvme_device.create_io_queue_pair(1, 4, 2, 0, 1,
+                                                1, 4, 2, 1, 0)
+    # Make sure nothing new was created
+    assert len(mocked_nvme_device.queue_mgr.nvme_queues) == 4
+    assert len(mocked_nvme_device.queue_mgr.io_sqids) == 3
+    assert len(mocked_nvme_device.queue_mgr.io_cqids) == 3
 
 
-def test_create_io_queues():
+def test_create_io_queues(mocked_nvme_device):
     ''' def create_io_queues(self, num_queues=10, queue_entries=256, sq_nvme_set_id=0):
     '''
-    pass
+    mocked_nvme_device.init_admin_queues(2, 2)
+    assert len(mocked_nvme_device.queue_mgr.nvme_queues) == 1
+    # Make sure that we allocated 2 memory regions for each the sq and cq
+    assert len(mocked_nvme_device.mem_mgr.allocated_mem_list()) == 2
+
+    # Create queues, make sure they are all there
+    mocked_nvme_device.create_io_queues(10, 256, 0)
+    assert len(mocked_nvme_device.queue_mgr.nvme_queues) == 11
+    assert len(mocked_nvme_device.queue_mgr.io_sqids) == 10
+    assert len(mocked_nvme_device.queue_mgr.io_cqids) == 10
+    assert len(mocked_nvme_device.mem_mgr.allocated_mem_list()) == 22
 
 
-def test_delete_io_queues():
+def test_delete_io_queues(mocked_nvme_device):
     ''' def delete_io_queues(self):
     '''
-    pass
+    # First try calling it without any queues to see how it works
+    mocked_nvme_device.delete_io_queues()
+    assert len(mocked_nvme_device.queue_mgr.nvme_queues) == 0
+    assert len(mocked_nvme_device.queue_mgr.io_sqids) == 0
+    assert len(mocked_nvme_device.queue_mgr.io_cqids) == 0
+    assert len(mocked_nvme_device.mem_mgr.allocated_mem_list()) == 0
+
+    # Now create some queues, delete them and check
+    mocked_nvme_device.init_admin_queues(2, 2)
+    mocked_nvme_device.create_io_queues(10, 256, 0)
+    assert len(mocked_nvme_device.queue_mgr.nvme_queues) == 11
+    assert len(mocked_nvme_device.queue_mgr.io_sqids) == 10
+    assert len(mocked_nvme_device.queue_mgr.io_cqids) == 10
+    assert len(mocked_nvme_device.mem_mgr.allocated_mem_list()) == 22
+
+    mocked_nvme_device.delete_io_queues()
+    assert len(mocked_nvme_device.queue_mgr.nvme_queues) == 1  # admin remains
+    assert len(mocked_nvme_device.queue_mgr.io_sqids) == 0
+    assert len(mocked_nvme_device.queue_mgr.io_cqids) == 0
 
 
-def test_post_command():
+def test_post_command(mocked_nvme_device, mocked_admin_id_cmd):
     ''' def post_command(self, command):
     '''
-    pass
+    mocked_nvme_device.post_command(mocked_admin_id_cmd)
+    assert len(mocked_nvme_device.outstanding_commands) == 1
+    assert mocked_admin_id_cmd.start_time_ns != 0
 
 
-def test_poll_cq_completions():
+def test_poll_cq_completions(mocker, mocked_nvme_device):
     ''' def poll_cq_completions(self, cqids=None, max_completions=1, max_time_s=0):
     '''
-    pass
+    # First test without providing a queue
+    assert mocked_nvme_device.poll_cq_completions() == 0
+
+    # Create admin queue for testing
+    mocked_nvme_device.init_admin_queues(2, 2)
+
+    # Then providing a queue, admin in this case
+    mocked_nvme_device.get_completion = lambda x: True
+    assert mocked_nvme_device.poll_cq_completions(cqids=0) == 1
+
+    mocked_nvme_device.get_completion = lambda x: False
+    assert mocked_nvme_device.poll_cq_completions(cqids=0) == 0
+
+    # Then a list of queues
+    mocked_nvme_device.get_completion = lambda x: True
+    assert mocked_nvme_device.poll_cq_completions(cqids=[0]) == 1
+
+    mocked_nvme_device.get_completion = lambda x: False
+    assert mocked_nvme_device.poll_cq_completions(cqids=[0]) == 0
+
+    # Timeout
+    mocked_nvme_device.get_completion = lambda x: False
+    assert mocked_nvme_device.poll_cq_completions(max_time_s=0.0001) == 0
 
 
 def test_get_completion():
