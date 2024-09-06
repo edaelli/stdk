@@ -18,18 +18,24 @@ def mocked_nvme_device(pytestconfig):
         def __init__(self, page_size):
             self.page_size = page_size
             self._allocated_mem_list = []
+
         def malloc(self, size, direction, client=None):
             m = MemoryLocation(0x1000, 0x2000, size, 'mocked_dev')
             self._allocated_mem_list.append(m)
             return m
+
         def free(self, memory):
             pass
+
         def free_all(self):
             pass
+
         def allocated_mem_list(self):
             return self._allocated_mem_list
 
-    nvme_device = NVMeDeviceCommon('test_slot', None, pcie_regs, nvme_regs, MockedMemMgr(4096), 64, 16)
+    nvme_device = NVMeDeviceCommon('test_slot', None,
+                                   pcie_regs, nvme_regs,
+                                   MockedMemMgr(4096), 64, 16)
 
     yield nvme_device
 
@@ -121,6 +127,7 @@ def test_cc_enable(mocked_nvme_device):
     mocked_nvme_device.cc_enable()
     assert mocked_nvme_device.nvme_regs.CC.EN == 1
 
+
 def test_init_admin_queues(mocked_nvme_device):
     ''' def init_admin_queues(self, asq_entries, acq_entries):
     '''
@@ -155,11 +162,12 @@ def test_init_admin_queues(mocked_nvme_device):
     assert len(mocked_nvme_device.queue_mgr.nvme_queues) == 1
     assert len(mocked_nvme_device.queue_mgr.io_sqids) == 0
     assert len(mocked_nvme_device.queue_mgr.io_cqids) == 0
-    asq, acq = mocked_nvme_device.queue_mgr.nvme_queues[(0,0)]
-    assert type(asq) == NVMeSubmissionQueue
+    asq, acq = mocked_nvme_device.queue_mgr.nvme_queues[(0, 0)]
+    assert type(asq) is NVMeSubmissionQueue
     assert asq.qid == 0
-    assert type(acq) == NVMeCompletionQueue
+    assert type(acq) is NVMeCompletionQueue
     assert acq.qid == 0
+
 
 def test_create_io_queue_pair(mocked_nvme_device):
     ''' def create_io_queue_pair(self,
@@ -169,9 +177,9 @@ def test_create_io_queue_pair(mocked_nvme_device):
     # Must create admin queues before creating io queues
     mocked_nvme_device.init_admin_queues(2, 2)
     # This will segfault... Fix next!
-    #mocked_nvme_device.create_io_queue_pair(
-        #1, 1, 0, 0, 1,
-        #1, 1, 0, 1, 0)
+    # mocked_nvme_device.create_io_queue_pair(
+    # 1, 1, 0, 0, 1,
+    # 1, 1, 0, 1, 0)
 
 
 def test_create_io_queues():
