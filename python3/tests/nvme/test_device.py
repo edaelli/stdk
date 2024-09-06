@@ -1,14 +1,16 @@
 import pytest
+import ctypes
 from types import SimpleNamespace
 
 from lone.nvme.spec.registers.pcie_regs import PCIeRegistersDirect
 from lone.nvme.spec.registers.nvme_regs import NVMeRegistersDirect
 from lone.nvme.spec.queues import NVMeSubmissionQueue, NVMeCompletionQueue
+from lone.nvme.spec.commands.admin.identify import IdentifyController
+
 from lone.system import DevMemMgr, MemoryLocation
 
 from lone.nvme.device import CidMgr
 from lone.nvme.device import NVMeDeviceCommon, NVMeDeviceIntType
-from lone.nvme.spec.commands.admin.identify import IdentifyController
 
 
 ####################################################################################################
@@ -25,7 +27,11 @@ def mocked_nvme_device(mocker):
             self._allocated_mem_list = []
 
         def malloc(self, size, direction, client=None):
-            m = MemoryLocation(0x1000, 0x2000, size, 'mocked_dev')
+            memory = (ctypes.c_uint8 * size)()
+            m = MemoryLocation(ctypes.addressof(memory),
+                               ctypes.addressof(memory),
+                               size,
+                               'mocked_dev')
             self._allocated_mem_list.append(m)
             return m
 
@@ -168,9 +174,9 @@ def test_init_admin_queues(mocked_nvme_device):
 
     # Check AQA/ASQ/AQA/ACQ
     assert mocked_nvme_device.nvme_regs.AQA.ASQS == 1
-    assert mocked_nvme_device.nvme_regs.ASQ.ASQB == 0x2000
+    assert mocked_nvme_device.nvme_regs.ASQ.ASQB != 0
     assert mocked_nvme_device.nvme_regs.AQA.ACQS == 1
-    assert mocked_nvme_device.nvme_regs.ACQ.ACQB == 0x2000
+    assert mocked_nvme_device.nvme_regs.ACQ.ACQB != 0
 
     # Check CC
     assert mocked_nvme_device.nvme_regs.CC.IOSQES == 6
@@ -323,16 +329,64 @@ def test_poll_cq_completions(mocker, mocked_nvme_device):
     assert mocked_nvme_device.poll_cq_completions(max_time_s=0.0001) == 0
 
 
-def test_get_completion():
+def test_get_completion(mocker, mocked_nvme_device, mocked_admin_id_cmd):
     ''' def get_completion(self, cqid):
+
     '''
-    pass
+    # Test with admin queue
+    mocked_nvme_device.init_admin_queues(10, 10)
+    sq, cq = mocked_nvme_device.queue_mgr.get(0, 0)
+
+    # Mock a completion and set outstanding commands, P = 0
+    mocker.patch.object(cq, 'get_next_completion', lambda: SimpleNamespace(SF=SimpleNamespace(P=0),
+                                                                           CID=1,
+                                                                           SQID=0))
+    assert mocked_nvme_device.get_completion(0) is False
+
+    # Mock a completion and set outstanding commands, P = 1
+    mocker.patch.object(cq, 'get_next_completion', lambda: SimpleNamespace(SF=SimpleNamespace(P=1),
+                                                                           CID=1,
+                                                                           SQID=0))
+    mocked_nvme_device.outstanding_commands = {}
+    mocked_admin_id_cmd.posted = True
+    mocked_admin_id_cmd.CID = 1
+    mocked_admin_id_cmd.SQID = 0
+    mocked_nvme_device.complete_command = lambda cmd, cqe: None
+    mocked_nvme_device.outstanding_commands[(1, 0)] = mocked_admin_id_cmd
+    assert mocked_nvme_device.get_completion(0) is True
+
+    # Now with IO queues
+    mocked_nvme_device.create_io_queues(1, 256, 0)
+    mocker.patch.object(cq, 'get_next_completion', lambda: SimpleNamespace(SF=SimpleNamespace(P=0),
+                                                                           CID=1,
+                                                                           SQID=1))
+    mocked_nvme_device.outstanding_commands = {}
+    mocked_nvme_device.outstanding_commands[(1, 1)] = None
+    mocked_nvme_device.get_completion(1)
+    assert mocked_nvme_device.get_completion(0) is False
 
 
-def test_get_msix_completions():
+def test_get_msix_completions(mocker, mocked_nvme_device):
     ''' def get_msix_completions(self, cqids=None, max_completions=1, max_time_s=0):
     '''
-    pass
+    mocked_nvme_device.init_admin_queues(10, 10)
+    mocked_nvme_device.get_msix_vector_pending_count = lambda x: 0
+    mocked_nvme_device.get_completion = lambda x: 0
+
+    assert mocked_nvme_device.get_msix_completions() == 0
+    assert mocked_nvme_device.get_msix_completions(0) == 0
+    assert mocked_nvme_device.get_msix_completions(1) == 0
+
+    with pytest.raises(Exception):
+        mocked_nvme_device.get_msix_completions('invalid type')
+
+    # Test max time path
+    assert mocked_nvme_device.get_msix_completions(0, max_time_s=0.0001) == 0
+
+    # Test actually receiving completions path!
+    mocker.patch.object(mocked_nvme_device, 'get_msix_vector_pending_count', return_value=1)
+    mocker.patch.object(mocked_nvme_device, 'get_completion', side_effect=[True, True, True, False])
+    assert mocked_nvme_device.get_msix_completions(0, max_completions=3, max_time_s=1) == 3
 
 
 def test_complete_command():
