@@ -127,7 +127,7 @@ class NVMeStatusCodes:
         if type(key) is tuple:
             key, cmd_type = key
         else:
-            cmd_type = Generic
+            key, cmd_type = 0, Generic
 
         if type(key) is int:
             return self.__codes[(key, cmd_type)]
