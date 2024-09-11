@@ -429,6 +429,7 @@ class NVMeDeviceCommon:
         if sqid is None:
             if command.cmdset_admin:
                 sqid = 0
+                cqid = 0
             else:
                 sqid = self.queue_mgr.next_iosq_id()
 
@@ -448,10 +449,11 @@ class NVMeDeviceCommon:
         command.posted = True
 
         # Return the qpair in which the command was posted
-        return sqid, cqid
+        return sqid, cq.qid
 
     def alloc(self, command, bytes_per_block=None):
         set_buffer = False
+        size = None
 
         # Special handling for reads and writes
         if command.__class__.__name__ == 'Write':
@@ -475,6 +477,8 @@ class NVMeDeviceCommon:
                 direction = DMADirection.HOST_TO_DEVICE
                 size = len(command)
                 set_buffer = True
+
+        assert size is not None, 'Could not figure out size for command'
 
         # Allocate memory, set PRPs
         prp = PRP(self.mem_mgr, size,

@@ -46,13 +46,18 @@ def test_nvme_device_common_init():
     assert callable(nvme_device.get_completions)
 
 
-def test_cc_disable(mocked_nvme_device):
+def test_cc_disable(mocker, mocked_nvme_device):
     ''' def cc_disable(self, timeout_s=10):
     '''
+    # Mock time.sleep for these tests
+    mocker.patch('time.sleep', None)
+
     # Timeout path, includes more than one loop
     mocked_nvme_device.nvme_regs.CSTS.RDY = 1
     with pytest.raises(Exception):
-        mocked_nvme_device.cc_disable(timeout_s=0.00001)
+        mocked_nvme_device.cc_disable(timeout_s=0)
+    with pytest.raises(Exception):
+        mocked_nvme_device.cc_disable(timeout_s=1)
     assert mocked_nvme_device.nvme_regs.CSTS.RDY == 1
     assert mocked_nvme_device.nvme_regs.CC.EN == 0
 
@@ -76,13 +81,18 @@ def test_cc_disable(mocked_nvme_device):
     assert len(mocked_nvme_device.outstanding_commands) == 0
 
 
-def test_cc_enable(mocked_nvme_device):
+def test_cc_enable(mocker, mocked_nvme_device):
     ''' def cc_enable(self, timeout_s=10):
     '''
+    # Mock time.sleep for these tests
+    mocker.patch('time.sleep', None)
+
     # Timeout path, includes more than one loop
     mocked_nvme_device.nvme_regs.CSTS.RDY = 0
     with pytest.raises(Exception):
-        mocked_nvme_device.cc_enable(timeout_s=0.00001)
+        mocked_nvme_device.cc_enable(timeout_s=0)
+    with pytest.raises(Exception):
+        mocked_nvme_device.cc_enable(timeout_s=1)
     assert mocked_nvme_device.nvme_regs.CC.EN == 1
 
     # Sucessful enable path
@@ -228,12 +238,12 @@ def test_delete_io_queues(mocked_nvme_device):
     assert len(mocked_nvme_device.queue_mgr.io_cqids) == 0
 
 
-def test_post_command(mocked_nvme_device, mocked_admin_id_cmd):
+def test_post_command(mocked_nvme_device, mocked_admin_cmd):
     ''' def post_command(self, command):
     '''
-    mocked_nvme_device.post_command(mocked_admin_id_cmd)
+    mocked_nvme_device.post_command(mocked_admin_cmd)
     assert len(mocked_nvme_device.outstanding_commands) == 1
-    assert mocked_admin_id_cmd.start_time_ns != 0
+    assert mocked_admin_cmd.start_time_ns != 0
 
 
 def test_poll_cq_completions(mocker, mocked_nvme_device):
@@ -264,7 +274,7 @@ def test_poll_cq_completions(mocker, mocked_nvme_device):
     assert mocked_nvme_device.poll_cq_completions(max_time_s=0.0001) == 0
 
 
-def test_get_completion(mocker, mocked_nvme_device, mocked_admin_id_cmd):
+def test_get_completion(mocker, mocked_nvme_device, mocked_admin_cmd):
     ''' def get_completion(self, cqid):
 
     '''
@@ -283,11 +293,11 @@ def test_get_completion(mocker, mocked_nvme_device, mocked_admin_id_cmd):
                                                                            CID=1,
                                                                            SQID=0))
     mocked_nvme_device.outstanding_commands = {}
-    mocked_admin_id_cmd.posted = True
-    mocked_admin_id_cmd.CID = 1
-    mocked_admin_id_cmd.SQID = 0
+    mocked_admin_cmd.posted = True
+    mocked_admin_cmd.CID = 1
+    mocked_admin_cmd.SQID = 0
     mocked_nvme_device.complete_command = lambda cmd, cqe: None
-    mocked_nvme_device.outstanding_commands[(1, 0)] = mocked_admin_id_cmd
+    mocked_nvme_device.outstanding_commands[(1, 0)] = mocked_admin_cmd
     assert mocked_nvme_device.get_completion(0) is True
 
     # Now with IO queues
@@ -324,34 +334,84 @@ def test_get_msix_completions(mocker, mocked_nvme_device):
     assert mocked_nvme_device.get_msix_completions(0, max_completions=3, max_time_s=1) == 3
 
 
-def test_complete_command():
+def test_complete_command(mocked_nvme_device, mocked_admin_cmd):
     ''' def complete_command(self, command, cqe):
     '''
-    pass
+    mocked_admin_cmd.prp = SimpleNamespace(
+        get_data_buffer=lambda: bytearray(len(mocked_admin_cmd.data_in)))
+    mocked_nvme_device.outstanding_commands[(0, 0)] = mocked_admin_cmd
+    mocked_admin_cmd.posted = True
+    mocked_nvme_device.complete_command(mocked_admin_cmd, mocked_admin_cmd.cqe)
+    assert mocked_admin_cmd.posted is False
+    assert len(mocked_nvme_device.outstanding_commands) == 0
+
+    # Pretend it didnt have data in
+    mocked_nvme_device.outstanding_commands[(0, 0)] = mocked_admin_cmd
+    mocked_admin_cmd.posted = True
+    mocked_admin_cmd.data_in = None
+    mocked_nvme_device.complete_command(mocked_admin_cmd, mocked_admin_cmd.cqe)
+    assert mocked_admin_cmd.posted is False
+    assert len(mocked_nvme_device.outstanding_commands) == 0
 
 
-def test_process_completions():
+def test_process_completions(mocked_nvme_device):
     ''' def process_completions(self, cqids=None, max_completions=1, max_time_s=0):
     '''
-    pass
+    mocked_nvme_device.get_completions = lambda x, y, z: 0
+    assert mocked_nvme_device.process_completions() == 0
 
 
-def test_sync_cmd():
+def test_sync_cmd(mocker, mocked_nvme_device, mocked_admin_cmd):
     ''' def sync_cmd(self, command, sqid=None, cqid=None, timeout_s=10, check=True):
     '''
-    pass
+    # Mocked device mocks sync_cmd, so access it directly here
+    sync_cmd = type(mocked_nvme_device).sync_cmd
+    mocked_nvme_device.start_cmd = lambda x, y, z: None
+    mocked_nvme_device.get_completions = lambda x, y, z: None
+    mocked_nvme_device.start_cmd = lambda x, y, z: None
+
+    mocked_admin_cmd.complete = False
+    with pytest.raises(Exception):
+        sync_cmd(mocked_nvme_device, mocked_admin_cmd)
+
+    mocked_admin_cmd.complete = True
+    sync_cmd(mocked_nvme_device, mocked_admin_cmd)
+
+    mocked_admin_cmd.complete = True
+    sync_cmd(mocked_nvme_device, mocked_admin_cmd, check=False)
 
 
-def test_start_cmd():
+def test_start_cmd(mocked_nvme_device, mocked_admin_cmd):
     ''' def start_cmd(self, command, sqid=None, cqid=None):
     '''
-    pass
+    mocked_nvme_device.init_admin_queues(10, 10)
+    mocked_nvme_device.queue_mgr.next_iosq_id = lambda: 1
+    mocked_nvme_device.queue_mgr.get = lambda x, y: (SimpleNamespace(qid=0),
+                                                     SimpleNamespace(qid=0))
+    mocked_nvme_device.post_command = lambda x: None
+
+    # Make sure the queues match at the end of the test: (0, 0)
+    mocked_admin_cmd.posted = False
+    assert mocked_nvme_device.start_cmd(mocked_admin_cmd) == (0, 0)
+
+    # Make sure the queues match at the end of the test: (0, 0)
+    mocked_admin_cmd.posted = False
+    assert mocked_nvme_device.start_cmd(mocked_admin_cmd, sqid=0) == (0, 0)
+
+    # Make sure the queues match at the end of the test: (1, 1)
+    mocked_admin_cmd.posted = False
+    mocked_admin_cmd.cmdset_admin = 0
+    mocked_nvme_device.queue_mgr.get = lambda x, y: (SimpleNamespace(qid=1),
+                                                     SimpleNamespace(qid=1))
+    assert mocked_nvme_device.start_cmd(mocked_admin_cmd) == (1, 1)
 
 
-def test_alloc():
+def test_alloc(mocked_nvme_device, mocked_admin_cmd):
     ''' def alloc(self, command, bytes_per_block=None):
     '''
-    pass
+    mocked_nvme_device.alloc(mocked_admin_cmd)
+
+    # Add mocked Write, Read to conftest, use here
 
 
 def test_delete():

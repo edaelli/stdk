@@ -50,9 +50,9 @@ def test_admin_commands():
     assert Sanitize().OPC == 0x84
 
 
-def test_gsf_response(mocked_admin_id_cmd):
+def test_gsf_response(mocked_admin_cmd):
     arb_gf = GetFeatureArbitration()
-    arb_gf.response(mocked_admin_id_cmd.cqe)
+    arb_gf.response(mocked_admin_cmd.cqe)
 
 
 def test_nvm_commands():
@@ -77,28 +77,28 @@ def test_status_code():
     assert str(e) == 'SF.SC: 0x02 "test" cmd: Generic'
 
 
-def test_status_codes(mocked_admin_id_cmd):
+def test_status_codes(mocked_admin_cmd):
     scs = NVMeStatusCodes()
     scs.add(NVMeStatusCode(0xED, 'Testing'))
 
     # Check type of get return
-    assert scs.get(mocked_admin_id_cmd).cmd_type.__name__ == 'Generic'
+    assert scs.get(mocked_admin_cmd).cmd_type.__name__ == 'Generic'
 
     # Check type of get return on failure
-    mocked_admin_id_cmd.cqe.SF.SCT = 1
-    assert scs.get(mocked_admin_id_cmd).cmd_type.__name__ == 'IdentifyController'
+    mocked_admin_cmd.cqe.SF.SCT = 1
+    assert scs.get(mocked_admin_cmd).cmd_type.__name__ == 'ADMINCommand'
 
     # Check that getting a good status does not raise and exception
-    mocked_admin_id_cmd.cqe.SF.SCT = 0
-    scs.check(mocked_admin_id_cmd, raise_exc=True)
+    mocked_admin_cmd.cqe.SF.SCT = 0
+    scs.check(mocked_admin_cmd, raise_exc=True)
 
     # Check that getting a bad status raises an exception
-    mocked_admin_id_cmd.cqe.SF.SCT = 1
+    mocked_admin_cmd.cqe.SF.SCT = 1
     with pytest.raises(NVMeStatusCodeException):
-        scs.check(mocked_admin_id_cmd, raise_exc=True)
+        scs.check(mocked_admin_cmd, raise_exc=True)
 
     # Check that a bad status with raise_exc = False does not raise an exception
-    scs.check(mocked_admin_id_cmd, raise_exc=False)
+    scs.check(mocked_admin_cmd, raise_exc=False)
 
     # Test __getitem__
     scs = NVMeStatusCodes()

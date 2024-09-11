@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 from lone.nvme.spec.registers.pcie_regs import PCIeRegistersDirect
 from lone.nvme.spec.registers.nvme_regs import NVMeRegistersDirect
-from lone.nvme.spec.commands.admin.identify import IdentifyController
+from lone.nvme.spec.structures import ADMINCommand, DataInCommon
 from lone.system import DevMemMgr, MemoryLocation
 from lone.nvme.device import NVMeDeviceCommon
 
@@ -60,8 +60,13 @@ def mocked_nvme_device(mocker):
 # pytest fixture for mocking an admin command that can be used in unittests
 ####################################################################################################
 @pytest.fixture(scope='function')
-def mocked_admin_id_cmd(mocker):
-    id_cmd = IdentifyController()
-    id_cmd.sq = SimpleNamespace(post_command=lambda x: True,
-                                qid=0)
-    yield id_cmd
+def mocked_admin_cmd(mocker):
+    admin_cmd = ADMINCommand()
+    admin_cmd.sq = SimpleNamespace(post_command=lambda x: True,
+                                   qid=0,
+                                   head=SimpleNamespace(set=lambda x: None))
+    admin_cmd.cq = SimpleNamespace(consume_completion=lambda: None,
+                                   qid=0)
+    admin_cmd.data_in = DataInCommon()
+    admin_cmd.data_in_type = DataInCommon
+    yield admin_cmd
