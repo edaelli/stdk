@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 from lone.nvme.spec.registers.pcie_regs import PCIeRegistersDirect
 from lone.nvme.spec.registers.nvme_regs import NVMeRegistersDirect
-from lone.nvme.spec.structures import ADMINCommand, DataInCommon
+from lone.nvme.spec.structures import ADMINCommand, NVMCommand, DataInCommon, DataOutCommon
 from lone.system import DevMemMgr, MemoryLocation
 from lone.nvme.device import NVMeDeviceCommon
 
@@ -21,14 +21,16 @@ def mocked_nvme_device(mocker):
         def __init__(self, page_size):
             self.page_size = page_size
             self._allocated_mem_list = []
+            self._used_memory = []
 
-        def malloc(self, size, direction, client=None):
+        def malloc(self, size, direction, client='mocked_dev'):
             memory = (ctypes.c_uint8 * size)()
             m = MemoryLocation(ctypes.addressof(memory),
                                ctypes.addressof(memory),
                                size,
-                               'mocked_dev')
+                               client)
             self._allocated_mem_list.append(m)
+            self._used_memory.append(memory)
             return m
 
         def free(self, memory):
@@ -67,6 +69,37 @@ def mocked_admin_cmd(mocker):
                                    head=SimpleNamespace(set=lambda x: None))
     admin_cmd.cq = SimpleNamespace(consume_completion=lambda: None,
                                    qid=0)
-    admin_cmd.data_in = DataInCommon()
-    admin_cmd.data_in_type = DataInCommon
+
+    class DataIn(DataInCommon):
+        _fields_ = [('data', ctypes.c_uint8 * 4096)]
+
+    admin_cmd.data_in = DataIn()
+    admin_cmd.data_in_type = DataIn
     yield admin_cmd
+
+
+####################################################################################################
+# pytest fixture for mocking an nvm command that can be used in unittests
+####################################################################################################
+@pytest.fixture(scope='function')
+def mocked_nvm_cmd(mocker):
+    nvm_cmd = NVMCommand()
+    nvm_cmd.sq = SimpleNamespace(post_command=lambda x: True,
+                                 qid=0,
+                                 head=SimpleNamespace(set=lambda x: None))
+    nvm_cmd.cq = SimpleNamespace(consume_completion=lambda: None,
+                                 qid=0)
+
+    class DataIn(DataInCommon):
+        _fields_ = [('data', ctypes.c_uint8 * 4096)]
+
+    class DataOut(DataOutCommon):
+        _fields_ = [('data', ctypes.c_uint8 * 4096)]
+
+    nvm_cmd.data_in = DataIn()
+    nvm_cmd.data_in_type = DataIn
+
+    nvm_cmd.data_out = DataOut()
+    nvm_cmd.data_out_type = DataOut
+
+    yield nvm_cmd

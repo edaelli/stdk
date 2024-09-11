@@ -406,12 +406,33 @@ def test_start_cmd(mocked_nvme_device, mocked_admin_cmd):
     assert mocked_nvme_device.start_cmd(mocked_admin_cmd) == (1, 1)
 
 
-def test_alloc(mocked_nvme_device, mocked_admin_cmd):
+def test_alloc(mocked_nvme_device, mocked_admin_cmd, mocked_nvm_cmd):
     ''' def alloc(self, command, bytes_per_block=None):
     '''
     mocked_nvme_device.alloc(mocked_admin_cmd)
+    assert mocked_admin_cmd.prp is not None
+    assert mocked_admin_cmd.prp.num_bytes == len(mocked_admin_cmd.data_in)
 
-    # Add mocked Write, Read to conftest, use here
+    mocked_nvme_device.alloc(mocked_nvm_cmd)
+    assert mocked_nvm_cmd.prp.num_bytes == len(mocked_nvm_cmd.data_in)
+
+    # Test allocating a write command
+    mocked_nvm_cmd.__class__.__name__ = 'Write'
+    mocked_nvm_cmd.NLB = 0
+    mocked_nvme_device.alloc(mocked_nvm_cmd, bytes_per_block=4096)
+    assert mocked_nvm_cmd.prp.num_bytes == 4096
+
+    # Test allocating a read command
+    mocked_nvm_cmd.__class__.__name__ = 'Read'
+    mocked_nvm_cmd.NLB = 0
+    mocked_nvme_device.alloc(mocked_nvm_cmd, bytes_per_block=4096)
+    assert mocked_nvm_cmd.prp.num_bytes == 4096
+
+    mocked_nvm_cmd.__class__.__name__ = 'NotReadWrite'
+    mocked_nvm_cmd.data_in_type = None
+    mocked_nvm_cmd.data_out_type = None
+    with pytest.raises(AssertionError):
+        mocked_nvme_device.alloc(mocked_nvm_cmd)
 
 
 def test_delete():

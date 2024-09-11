@@ -471,11 +471,11 @@ class NVMeDeviceCommon:
             # Not reads and writes
             if hasattr(command, 'data_in_type') and command.data_in_type is not None:
                 direction = DMADirection.DEVICE_TO_HOST
-                size = len(command)
+                size = len(command.data_in)
 
             if hasattr(command, 'data_out_type') and command.data_out_type is not None:
                 direction = DMADirection.HOST_TO_DEVICE
-                size = len(command)
+                size = len(command.data_out)
                 set_buffer = True
 
         assert size is not None, 'Could not figure out size for command'
