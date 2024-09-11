@@ -1,9 +1,16 @@
 import pytest
 from types import SimpleNamespace
 
+from lone.system import System
 from lone.nvme.spec.queues import NVMeSubmissionQueue, NVMeCompletionQueue
 from lone.nvme.device import CidMgr
-from lone.nvme.device import NVMeDeviceCommon, NVMeDeviceIntType
+from lone.nvme.device import NVMeDevice, NVMeDeviceCommon, NVMeDeviceIntType, NVMeDevicePhysical
+from lone.nvme.device.identify import NVMeDeviceIdentifyData
+from lone.nvme.spec.commands.admin.identify import (IdentifyNamespaceListData,
+                                                    IdentifyNamespaceData)
+from lone.nvme.spec.commands.status_codes import NVMeStatusCodeException
+
+from nvsim import NVMeSimulator
 
 
 ####################################################################################################
@@ -435,74 +442,179 @@ def test_alloc(mocked_nvme_device, mocked_admin_cmd, mocked_nvm_cmd):
         mocked_nvme_device.alloc(mocked_nvm_cmd)
 
 
-def test_delete():
+def test_delete(mocked_nvme_device):
     ''' def __del__(self):
     '''
-    pass
+    mocked_nvme_device.__del__()
 
 
 ####################################################################################################
 # NVMeDevice tests
 ####################################################################################################
-def test_nvme_device():
-    pass
+def test_nvme_device(mocker):
+    # Test that we get the right type of device when using nvsim and a real pcie device
+    assert type(NVMeDevice('nvsim')) is NVMeSimulator
+
+    mocker.patch('lone.nvme.device.NVMeDevicePhysical.__init__', lambda x, y: None)
+    assert type(NVMeDevice('test_slot')) is NVMeDevicePhysical
 
 
 ####################################################################################################
 # NVMeDevicePhysical tests
 ####################################################################################################
-def test_nvme_device_physical_init():
+def test_nvme_device_physical(mocker):
     ''' def __init__(self, pci_slot):
     '''
-    pass
+    class MockedDevMemMgr:
+        def __init__(self, a, b, c, d, e):
+            pass
+    System.DevMemMgr = MockedDevMemMgr
 
+    class MockedUserspaceDevice:
+        def __init__(self, pci_slot):
+            pass
 
-def test_init_msix_interrupts():
-    ''' def init_msix_interrupts(self, num_vectors, start=0):
-    '''
-    pass
+        def pci_regs(self):
+            return SimpleNamespace(init_capabilities=lambda: None)
 
+        def nvme_regs(self):
+            return SimpleNamespace(CC=SimpleNamespace(MPS=0))
 
-def test_get_msix_vector_pending_count():
-    ''' def get_msix_vector_pending_count(self, vector):
-    '''
-    pass
+        def map_dma_region_read(self):
+            pass
+
+        def map_dma_region_write(self):
+            pass
+
+        def unmap_dma_region(self):
+            pass
+
+        def enable_msix(self, num_vectors, start):
+            pass
+
+        def get_msix_vector_pending_count(self, vector):
+            return 0
+
+        iova_ranges = []
+    System.PciUserspaceDevice = MockedUserspaceDevice
+
+    # Test mocked physical device
+    nvme_dev = NVMeDevicePhysical('slot')
+    assert nvme_dev.mps == 4096
+
+    # init_msix_interrupts(self, num_vectors, start=0)
+    nvme_dev.init_msix_interrupts(10, 0)
+
+    # get_msix_vector_pending_count(self, vector)
+    assert nvme_dev.get_msix_vector_pending_count(0) == 0
 
 
 ####################################################################################################
 # NVMeDeviceIdentifyData tests
 ####################################################################################################
-def test_nvme_identify_data_init():
+def test_nvme_identify_data_init(mocked_nvme_device):
     ''' def __init__(self, nvme_device):
     '''
-    pass
+    NVMeDeviceIdentifyData(mocked_nvme_device, initialize=False)
 
 
-def test_ns_size():
+def test_nvme_identify_data_initialize(mocker, mocked_nvme_device):
+    ''' def initialize(self):
+    '''
+    # First test without init, then mock and test with init
+    NVMeDeviceIdentifyData(mocked_nvme_device, initialize=False)
+
+    mocker.patch.object(NVMeDeviceIdentifyData, 'identify_controller', lambda x: None)
+    mocker.patch.object(NVMeDeviceIdentifyData, 'identify_namespaces', lambda x: (None, None))
+    mocker.patch.object(NVMeDeviceIdentifyData, 'identify_uuid_list', lambda x: None)
+    NVMeDeviceIdentifyData(mocked_nvme_device, initialize=True)
+
+
+def test_ns_size(mocked_nvme_device):
     ''' def ns_size(self, lba_ds_bytes, nsze, nuse):
     '''
-    pass
+    id_data = NVMeDeviceIdentifyData(mocked_nvme_device, initialize=False)
+
+    usage, total, unit = id_data.ns_size(0, 0, 0)
+    assert unit == 'B'
+
+    usage, total, unit = id_data.ns_size(1024**1, 1, 1)
+    assert unit == 'KB'
+
+    usage, total, unit = id_data.ns_size(1024**2, 1, 1)
+    assert unit == 'MB'
+
+    usage, total, unit = id_data.ns_size(1024**3, 1, 1)
+    assert unit == 'GB'
+
+    usage, total, unit = id_data.ns_size(1024**4, 1, 1)
+    assert unit == 'TB'
 
 
-def test_lba_ds_size():
+def test_lba_ds_size(mocked_nvme_device):
     ''' def lba_ds_size(self, lba_ds_bytes):
     '''
-    pass
+    id_data = NVMeDeviceIdentifyData(mocked_nvme_device, initialize=False)
+
+    size, unit = id_data.lba_ds_size(512)
+    assert unit == 'B'
+
+    size, unit = id_data.lba_ds_size(4096)
+    assert unit == 'KiB'
 
 
-def test_identify_namespaces():
+def test_identify_namespaces(mocker, mocked_nvme_device):
     ''' def identify_namespaces(self):
     '''
-    pass
+    class CmdSeq:
+        def __init__(self):
+            self.i = 0
+
+        def __call__(self, command):
+            # Send the correct sequence of data_in objects to test all paths
+            if self.i == 0:
+                data = IdentifyNamespaceListData()
+                data.Identifiers[0] = 1
+
+            elif self.i == 1:
+                data = IdentifyNamespaceData()
+                data.NSZE = 1
+                data.NUSE = 1
+                data.FLBAS = 0
+                data.LBAF_TBL[0].LBADS = 1
+                data.LBAF_TBL[0].MS = 0
+
+            else:
+                data = None
+
+            command.data_in = data
+
+            self.i += 1
+
+    mocker.patch.object(mocked_nvme_device, 'sync_cmd', side_effect=CmdSeq())
+
+    id_data = NVMeDeviceIdentifyData(mocked_nvme_device, initialize=False)
+
+    # Test identify_namespaces with the IdentifyNamespaceListData above
+    id_data.identify_namespaces()
 
 
-def test_identify_uuid_list():
+def test_identify_uuid_list(mocker, mocked_nvme_device):
     ''' def identify_uuid_list(self):
     '''
-    pass
+    id_data = NVMeDeviceIdentifyData(mocked_nvme_device, initialize=False)
+    id_data.identify_uuid_list()
+
+    # With exception on sync_cmd
+    mocker.patch.object(mocked_nvme_device, 'sync_cmd', side_effect=[
+        NVMeStatusCodeException(SimpleNamespace(value=0,
+                                                name='',
+                                                cmd_type=SimpleNamespace(__name__='')))])
+    id_data.identify_uuid_list()
 
 
-def test_identify_controller():
+def test_identify_controller(mocked_nvme_device):
     ''' def identify_controller(self):
     '''
-    pass
+    id_data = NVMeDeviceIdentifyData(mocked_nvme_device, initialize=False)
+    id_data.identify_controller()

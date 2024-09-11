@@ -12,10 +12,13 @@ logger = logging.getLogger('nvme_device')
 
 class NVMeDeviceIdentifyData:
 
-    def __init__(self, nvme_device):
+    def __init__(self, nvme_device, initialize=True):
         self.nvme_device = nvme_device
 
-        self.identify_data = {}
+        if initialize:
+            self.initialize()
+
+    def initialize(self):
         self.controller = self.identify_controller()
         self.namespace, self.namespaces = self.identify_namespaces()
         self.uuid_list = self.identify_uuid_list()
@@ -110,7 +113,7 @@ class NVMeDeviceIdentifyData:
             self.nvme_device.sync_cmd(id_uuid_list_cmd)
         except NVMeStatusCodeException:
             logger.info('Device failed id uuid list command!')
-        self.uuid_list = id_uuid_list_cmd.data_in
+        return id_uuid_list_cmd.data_in
 
     def identify_controller(self):
         # Send an Identify controller command, check response
