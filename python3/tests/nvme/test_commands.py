@@ -107,6 +107,7 @@ def test_status_codes(mocked_admin_cmd):
     assert scs[(0xED, Identify)].cmd_type.__name__ == 'Identify'
     assert scs[('Successful Completion', Generic)].cmd_type.__name__ == 'Generic'
     scs[('Testing', Identify)]
+    scs[('Invalid', Identify)]
 
     with pytest.raises(AssertionError):
         scs[([], Identify)]
