@@ -14,6 +14,7 @@ class PRP:
         self.mem_mgr = mem_mgr
         self.num_bytes = num_bytes
         self.mps = mps
+        self.direction = direction
         self.client = client
 
         self.prp1 = 0
@@ -22,8 +23,6 @@ class PRP:
         self.prp2_mem = None
 
         self.mem_list = []
-
-        assert num_bytes <= (2 * 1024 * 1024), 'Support for PRPs larger than 2M not implemented!'
 
         # How many PRPs fit in a mps sized page (-1 because the last address is
         #  a pointer to the next list)
@@ -37,36 +36,39 @@ class PRP:
         self.lists_needed = math.ceil(
             (self.pages_needed - 1) / self.prps_per_page) if self.pages_needed > 2 else 0
 
+        # If we need lists, then we need more pages
+        self.pages_needed += self.lists_needed
+
         # Allocate memory
         if alloc is True:
-            self.alloc(direction)
+            self.alloc()
 
     def malloc_page(self, direction, client):
         mem = self.mem_mgr.malloc(self.mps, direction, client=' '.join([self.client, client]))
         self.mem_list.append(mem)
         return mem
 
-    def alloc(self, data_dma_direction):
+    def alloc(self):
 
         # Less than MPS, only need PRP1, no offset
         # The memory list has to be one item large enough for mps
         if self.pages_needed == 1:
-            self.prp1_mem = self.malloc_page(data_dma_direction, client='prp1_only')
+            self.prp1_mem = self.malloc_page(self.direction, client='prp1_only')
             self.prp1 = self.prp1_mem.iova
 
         # If exactly 2 * MPS, use 2 PRPs
         # The memory list has to be 2 items each large enough for 1/2 of the data
         elif self.pages_needed == 2:
-            self.prp1_mem = self.malloc_page(data_dma_direction, client='prp1_prp2_1')
+            self.prp1_mem = self.malloc_page(self.direction, client='prp1_prp2_1')
             self.prp1 = self.prp1_mem.iova
-            self.prp2_mem = self.malloc_page(data_dma_direction, client='prp1_prp2_2')
+            self.prp2_mem = self.malloc_page(self.direction, client='prp1_prp2_2')
             self.prp2 = self.prp2_mem.iova
 
         # We will need one or more lists
         else:
             rem_bytes = self.num_bytes
 
-            self.prp1_mem = self.malloc_page(data_dma_direction, client='prp_list_1')
+            self.prp1_mem = self.malloc_page(self.direction, client='prp_list_1')
             self.prp1 = self.prp1_mem.iova
             rem_bytes -= self.mps
 
@@ -82,7 +84,7 @@ class PRP:
             for i in range(self.prps_per_page):
 
                 # Allocate memory
-                self.prp_segment = self.malloc_page(data_dma_direction,
+                self.prp_segment = self.malloc_page(self.direction,
                                                     client='prp_list_seg_{}'.format(i))
 
                 prp_list_data[i] = self.prp_segment.iova
@@ -98,7 +100,6 @@ class PRP:
                 This assumes that a NVMe PRP starts at address and is properly formatted.
         '''
 
-        # TODO: This is mostly untested!!!! ADD TESTS
         if self.pages_needed == 1:
             assert prp1_address != 0, (
                 'Must have a PRP1 address for num_bytes {}'.format(self.num_bytes))
@@ -107,6 +108,12 @@ class PRP:
             self.mem_list.append(self.prp1_mem)
 
         elif self.pages_needed == 2:
+            assert prp1_address != 0, (
+                'Must have a PRP1 address for num_bytes {}'.format(self.num_bytes))
+            self.prp1 = prp1_address
+            self.prp1_mem = MemoryLocation(self.prp1, self.prp1, self.mps, 'prp.from_address')
+            self.mem_list.append(self.prp1_mem)
+
             assert prp2_address != 0, (
                 'Must have a PRP2 address for num_bytes {}'.format(self.num_bytes))
             self.prp2 = prp2_address
@@ -132,9 +139,8 @@ class PRP:
 
             # Find all the segments
             for prp_segment in prp_list_data:
-                if prp_segment:
-                    prp_mem = MemoryLocation(prp_segment, prp_segment, self.mps, 'prp.from_address')
-                    self.mem_list.append(prp_mem)
+                prp_mem = MemoryLocation(prp_segment, prp_segment, self.mps, 'prp.from_address')
+                self.mem_list.append(prp_mem)
 
         return self
 
@@ -185,6 +191,7 @@ class PRP:
     def free_all_memory(self):
         for mem in self.mem_list:
             self.mem_mgr.free(mem)
+            self.mem_list.remove(mem)
 
     def get_data_segments(self):
         segments = []
@@ -229,7 +236,7 @@ class PRP:
 
             # Truncate if we were told to set less bytes than a segment
             if (i + segment.size) > len(data):
-                data_len = len(data)
+                data_len = len(data) - i
             else:
                 data_len = i + segment.size
 
