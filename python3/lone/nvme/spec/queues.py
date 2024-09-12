@@ -14,17 +14,19 @@ class NVMeHeadTail:
     def set(self, value):
         self._value.value = value
 
-    def add(self, num):
-        new_value = self._value.value + num
+    def advance(self):
+        new_value = self._value.value + 1
         if new_value == self.entries:
             new_value = 0
         self._value.value = new_value
 
-    def incr(self, num):
-        new_value = self._value.value + num
-        if new_value == self.entries:
-            new_value = 0
-        return new_value
+    def peek(self):
+        ''' Returns the next available head/tail position
+        '''
+        value = self._value.value + 1
+        if value == self.entries:
+            value = 0
+        return value
 
     @property
     def value(self):
@@ -43,10 +45,10 @@ class NVMeQueue:
         self.tail = NVMeHeadTail(self.entries, dbt_addr)
 
     def is_full(self):
-        return self.tail.incr(1) == self.head.value
+        return self.tail.peek() == self.head.value
 
     def num_entries(self):
-        if self.tail.incr(1) == self.head.value:
+        if self.tail.peek() == self.head.value:
             return self.entries - 1  # -1 because a full queue can only hold entries - 1 items
         elif self.tail.value == self.head.value:
             return 0
@@ -73,7 +75,7 @@ class NVMeSubmissionQueue(NVMeQueue):
         ctypes.memmove(next_slot_addr, ctypes.addressof(command), self.entry_size)
 
         # Increment tail, with wrapping
-        self.tail.add(1)
+        self.tail.advance()
 
     def get_command(self):
 
@@ -82,7 +84,7 @@ class NVMeSubmissionQueue(NVMeQueue):
         else:
             next_slot_addr = self.base_address.vaddr + (self.head.value * self.entry_size)
             command = Generic.from_address(next_slot_addr)
-            self.head.add(1)
+            self.head.advance()
             return command
 
 
@@ -99,7 +101,7 @@ class NVMeCompletionQueue(NVMeQueue):
         return CQE.from_address(next_slot_addr)
 
     def consume_completion(self):
-        self.head.add(1)
+        self.head.advance()
         if self.head.value == 0:
             self.phase = 0 if self.phase == 1 else 1
 
@@ -113,7 +115,7 @@ class NVMeCompletionQueue(NVMeQueue):
         cqe.SF.P = 0 if phase_bit == 1 else 1
 
         ctypes.memmove(next_slot_addr, ctypes.addressof(cqe), self.entry_size)
-        self.tail.add(1)
+        self.tail.advance()
 
 
 class QueueMgr:
@@ -143,7 +145,8 @@ class QueueMgr:
             if cqid == rem_cqid:
                 assert sq is None, "Removing CQ with not None SQ! {}".format(cqid)
                 self.nvme_queues[(sqid, cqid)] = (sq, None)
-                self.io_cqids.remove(cqid)
+                if cqid != 0:
+                    self.io_cqids.remove(cqid)
 
         # Now remove any that are None, None from our list
         remove_qs = []
@@ -157,14 +160,8 @@ class QueueMgr:
         for (sqid, cqid), (sq, cq) in self.nvme_queues.items():
             if sqid == rem_sqid:
                 self.nvme_queues[(sqid, cqid)] = (None, cq)
-                self.io_sqids.remove(sqid)
-        # Now remove any that are None, None from our list
-        remove_qs = []
-        for (sqid, cqid), (sq, cq) in self.nvme_queues.items():
-            if self.nvme_queues[(sqid, cqid)] == (None, None):
-                remove_qs.append((sqid, cqid))
-        for (sqid, cqid) in remove_qs:
-            self.nvme_queues.pop((sqid, cqid))
+                if sqid != 0:
+                    self.io_sqids.remove(sqid)
 
     def get_cqs(self):
         cqs = []
@@ -206,26 +203,33 @@ class QueueMgr:
                 sq = None
                 cq = None
 
-        # Else means sqid is None and cqid is not None
         # Find first sqid associated with cqid
-        else:
+        elif sqid is None and cqid is not None:
             for k, v in self.nvme_queues.items():
                 curr_sqid, curr_cqid = k
                 sq, cq = v
                 if cqid == curr_cqid:
                     break
             else:
-                sq = None
-                cq = None
+                sq, cq = None, None
 
-        if sq is None and cq is None:
-            return None
+        # Both None, find the first one
         else:
-            return sq, cq
+            for k, v in self.nvme_queues.items():
+                sq, cq = k
+                break
+            else:
+                sq, cq = None, None
+
+        # Finally return the queues we found
+        return sq, cq
 
     def next_iosq_id(self):
-        ret = self.io_sqids[self.io_sqid_index]
-        self.io_sqid_index += 1
-        if self.io_sqid_index + 1 > len(self.io_sqids):
-            self.io_sqid_index = 0
+        ret = None
+        if len(self.io_sqids):
+            ret = self.io_sqids[self.io_sqid_index]
+
+            self.io_sqid_index += 1
+            if self.io_sqid_index + 1 > len(self.io_sqids):
+                self.io_sqid_index = 0
         return ret

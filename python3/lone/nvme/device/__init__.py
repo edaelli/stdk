@@ -343,7 +343,7 @@ class NVMeDeviceCommon:
         if cqids is None:
             cqs = [cq for cq in self.queue_mgr.get_cqs()]
         elif type(cqids) is int:
-            cq = self.queue_mgr.get(None, cqids)
+            sq, cq = self.queue_mgr.get(None, cqids)
             if cq is not None:
                 cqs = [self.queue_mgr.get(None, cqids)[1]]
         else:
