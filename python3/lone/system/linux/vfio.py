@@ -290,17 +290,18 @@ class SysVfioIfc(SysPciUserspaceDevice):
         # Get IOMMU info
         iommu_get_info = VfioIommuGetInfo()
         iommu_get_info.ioctl(self.container_fd)
+        iommu_get_info_data = iommu_get_info.get_data()
 
         # Save page sizes
-        self.iova_pgsizes = iommu_get_info.iova_pgsizes
+        self.iova_pgsizes = iommu_get_info_data.iova_pgsizes
 
         # Figure out capabilities, only interested in iova ranges for now
         self.iova_ranges = []
-        next_cap_offset = iommu_get_info.cap_offset
+        next_cap_offset = iommu_get_info_data.cap_offset
         loops = 0
         while next_cap_offset != 0:
             cap_bytes = bytearray(
-                iommu_get_info.caps[next_cap_offset - VfioIommuGetInfo.caps_offset:])
+                iommu_get_info_data.caps[next_cap_offset - VfioIommuGetInfo.caps_offset:])
             cap = VfioCapHeader.from_buffer(cap_bytes)
             if cap.id == 0x01:
                 ranges = VfioCapIovaRanges.from_buffer(cap_bytes)

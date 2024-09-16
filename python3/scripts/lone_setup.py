@@ -8,7 +8,7 @@ from lone.system import System
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=['list', 'requirements', 'expose', 'reclaim'])
+    parser.add_argument('action', choices=['list', 'expose', 'reclaim'])
     args, unknown_args = parser.parse_known_args()
 
     if args.action == 'list':
@@ -40,9 +40,6 @@ def main():
             print()
         else:
             print('No devices found!')
-
-    elif args.action == 'requirements':
-        System.Requirements().check_requirements()
 
     elif args.action == 'expose':
         parser.add_argument('pci_slot')

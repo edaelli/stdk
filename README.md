@@ -50,18 +50,6 @@ lone aims to be the basis for writing both extremely simple and extremely comple
     vm.nr_hugepages = 1024
     ```
 
-- Check system requirements
-   ```
-   $ python3 python3/lone_setup.py requirements
-     Checking test system for Linux requirements:
-     -- Checking for Python 3.5.0+                  3.10.4                                             OK
-     -- Checking for Ubuntu 20.04+                  Ubuntu 22.04 LTS                                   OK
-     -- Checking for Intel VT-d / AMD-Vi            Present                                            OK
-     -- Checking for HugePages                      Present, 128 available, size: 2048 kB              OK
-     -- Checking for libhugetlbfs-dev               Present                                            OK
-     All requirements met
-   ```
-
 - List available devices and expose one to the lone user (uid = 1000) in the docker container:
     ```
     $ python3 python3/lone_setup.py list
@@ -173,25 +161,20 @@ lone uses IO Virtualization technology to present the 3 access mechanisms above 
 ### System Interface
 A System Interface class sits at the lowest level of the lone stack. This interface abstracts operating system and hardware access to the rest of the stack. It has the following interfaces:
 
-1. Requirements - Implements an interface into the system running lone application to check if all requirements are installed
+1. Pci - Implements an interface into the Pci subsystem of the OS/Hardware running lone applications. For example, it allows code to rescan the devices in the Pci bus for a system
 
-2. Pci - Implements an interface into the Pci subsystem of the OS/Hardware running lone applications. For example, it allows code to rescan the devices in the Pci bus for a system
+2. PciDevice - Implements an interface into each Pci device in a system. For example, it allows code to check if a device at a certain slot exists
 
-3. PciDevice - Implements an interface into each Pci device in a system. For example, it allows code to check if a device at a certain slot exists
+3. PciUserspace - Implements an interface into a system to interact with the userspace exposed functions of that system. For example, it can query the system for a list of userspace-exposed devices
 
-4. PciUserspace - Implements an interface into a system to interact with the userspace exposed functions of that system. For example, it can query the system for a list of userspace-exposed devices
+4. PciUserspaceDevice - Implements an interface into each userspace-exposed device. For example, it exposes the device's registers in a system independent way
 
-5. PciUserspaceDevice - Implements an interface into each userspace-exposed device. For example, it exposes the device's registers in a system independent way
-
-6. Memory - Implements an interface into the system running lone applications to allocate pinned memory (special memory pages that cannot be paged out by an OS's memory management system)
+5. Memory - Implements an interface into the system running lone applications to allocate pinned memory (special memory pages that cannot be paged out by an OS's memory management system)
 
 ### Layered Architecture
 lone software layers are organized as:
 
 <img src=doc/lone_layers.png width=600 align=center>
-
-## Requirements
-NOTE: lone currently implements the System Interfaces above for Linux only. Other OS support is possible, but not yet implemented.
 
 ### Hardware
 lone relies on a systems IOMMU hardware to safely allow userspace access of storage devices. The system must have Intel Vt-d, AMD Vi, etc for lone to work.

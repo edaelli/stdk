@@ -66,10 +66,6 @@ def nvme_reg_struct_factory(access_data):
             _base_offset_ = 0x00
 
         class Vs(RegsStructAccess):
-            @property
-            def __str__(self):
-                return '{}.{}.{}'.format(self.MJR, self.MNR, self.TER)
-
             _pack_ = 1
             _fields_ = [
                 ('TER', ctypes.c_uint32, 8),
