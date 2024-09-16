@@ -35,7 +35,7 @@ class HugePagesIovaMgr:
 
         # 0 is not really that great for an iova when debugging
         if next_available_iova == 0:
-            next_available_iova = 0x0000100
+            next_available_iova = 0x0001000
             assert next_available_iova <= max_range_iova, 'Invalid IOVA range'
 
         for i in range(self.max_iovas):
