@@ -43,6 +43,8 @@ def test_sysvfioifc_init(mocker):
     ranges = (VfioCapIovaRanges * 5)()
     mocker.patch('lone.system.linux.vfio.VfioCapIovaRanges.from_buffer',
                  side_effects=[ranges[0]])
+
+    mocker.patch('os.path.exists', return_value=True)
     ifc = SysVfioIfc('test', init=True)
 
     mocker.patch('os.path.exists', return_value=False)
