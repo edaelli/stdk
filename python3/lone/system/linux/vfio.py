@@ -7,6 +7,7 @@ import subprocess
 import pathlib
 import pyudev
 import mmap
+import time
 
 from lone.system import SysPciUserspace, SysPciUserspaceDevice
 from lone.nvme.spec.registers.pcie_regs import (PCIeRegisters,
@@ -338,6 +339,13 @@ class SysVfioIfc(SysPciUserspaceDevice):
         req = vfioGetRegionInfo(index=VfioIoctl.VFIO_PCI_ROM_REGION_INDEX)
         req.ioctl(self.device_fd)
         self.rom_region = {'size': req.size, 'offset': req.offset, 'flags': req.flags}
+
+        # The reset below will likely result in an FLR from the vfio -> pcie driver in linux.
+        #   Some devices may not be happy with back-to-back FLR's where the second one happens
+        #   when the first one is still in progress (not really a spec thing, but a common bug
+        #   on devices). So wait at least 2x the time an FLR should take per spec here to try
+        #   our best to avoid it.
+        time.sleep(.200)
 
         # Reset the device
         self.reset()
