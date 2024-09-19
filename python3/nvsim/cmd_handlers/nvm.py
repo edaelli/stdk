@@ -3,6 +3,7 @@ from lone.nvme.spec.commands.status_codes import status_codes
 from lone.nvme.spec.prp import PRP
 from lone.nvme.spec.commands.nvm.read import Read
 from lone.nvme.spec.commands.nvm.write import Write
+from lone.nvme.spec.commands.nvm.flush import Flush
 
 import logging
 logger = logging.getLogger('nvsim_nvm')
@@ -67,10 +68,28 @@ class NVSimRead:
         self.complete(command, sq, cq, status_code)
 
 
+class NVSimFlush:
+    OPC = Flush().OPC
+
+    def __call__(self, nvsim_state, command, sq, cq):
+        flush_cmd = Flush.from_buffer(command)
+        valid_nsids = [i for i, ns in enumerate(nvsim_state.namespaces) if i != 0]
+        valid_nsids.append(0xFFFFFFFF)
+
+        if flush_cmd.NSID not in valid_nsids:
+            status_code = status_codes['Invalid Namespace or Format']
+        else:
+            status_code = status_codes['Successful Completion']
+
+        # Complete the command
+        self.complete(command, sq, cq, status_code)
+
+
 # Create our admin command handlers object. Can you do this with introspection??
 nvm_handlers = NvsimCommandHandlers()
 for handler in [
     NVSimWrite,
     NVSimRead,
+    NVSimFlush,
 ]:
     nvm_handlers.register(handler)

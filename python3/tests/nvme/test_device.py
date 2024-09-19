@@ -53,6 +53,12 @@ def test_nvme_device_common_init():
     assert callable(nvme_device.get_completions)
 
 
+def test_initate_flr(mocker, mocked_nvme_device):
+    ''' def initiate_flr(self):
+    '''
+    mocked_nvme_device.initiate_flr()
+
+
 def test_cc_disable(mocker, mocked_nvme_device):
     ''' def cc_disable(self, timeout_s=10):
     '''
@@ -507,6 +513,13 @@ def test_nvme_device_physical(mocker):
 
     # get_msix_vector_pending_count(self, vector)
     assert nvme_dev.get_msix_vector_pending_count(0) == 0
+
+    def init_except(self, pcie_slot):
+        raise Exception('testing exception')
+
+    System.PciUserspaceDevice.__init__ = init_except
+    with pytest.raises(Exception):
+        nvme_dev = NVMeDevicePhysical('slot')
 
 
 ####################################################################################################

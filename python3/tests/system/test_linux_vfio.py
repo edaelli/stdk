@@ -1,3 +1,4 @@
+import pytest
 import subprocess
 import ctypes
 
@@ -43,6 +44,10 @@ def test_sysvfioifc_init(mocker):
     mocker.patch('lone.system.linux.vfio.VfioCapIovaRanges.from_buffer',
                  side_effects=[ranges[0]])
     ifc = SysVfioIfc('test', init=True)
+
+    mocker.patch('os.path.exists', return_value=False)
+    with pytest.raises(Exception):
+        ifc = SysVfioIfc('test', init=True)
 
 
 def test_get_irq_info(mocker):

@@ -103,7 +103,7 @@ def test_status_codes(mocked_admin_cmd):
     # Test __getitem__
     scs = NVMeStatusCodes()
     scs.add(NVMeStatusCode(0xED, 'Testing', Identify))
-    assert scs[Identify].cmd_type.__name__ == 'Generic'
+    assert scs['Successful Completion'].cmd_type.__name__ == 'Generic'
     assert scs[(0xED, Identify)].cmd_type.__name__ == 'Identify'
     assert scs[('Successful Completion', Generic)].cmd_type.__name__ == 'Generic'
     scs[('Testing', Identify)]

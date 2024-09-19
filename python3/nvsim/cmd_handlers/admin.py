@@ -17,9 +17,13 @@ from lone.nvme.spec.commands.admin.create_io_completion_q import CreateIOComplet
 from lone.nvme.spec.commands.admin.create_io_submission_q import CreateIOSubmissionQueue
 from lone.nvme.spec.commands.admin.delete_io_completion_q import DeleteIOCompletionQueue
 from lone.nvme.spec.commands.admin.delete_io_submission_q import DeleteIOSubmissionQueue
-from lone.nvme.spec.commands.admin.get_log_page import GetLogPage
-from lone.nvme.spec.commands.admin.get_log_page import GetLogPageSupportedLogPages
+from lone.nvme.spec.commands.admin.get_log_page import GetLogPage, GetLogPageSupportedLogPages
 from lone.nvme.spec.commands.admin.format_nvm import FormatNVM
+from lone.nvme.spec.commands.admin.get_set_feature import (GetFeature, SetFeature,
+                                                           FeaturePowerManagement,
+                                                           GetFeaturePowerManagement,
+                                                           SetFeaturePowerManagement)
+
 
 import logging
 logger = logging.getLogger('nvsim_admin')
@@ -230,6 +234,47 @@ class NVSimFormat:
         self.complete(command, sq, cq, status_codes['Successful Completion'])
 
 
+class NVSimGetFeature:
+    OPC = GetFeature().OPC
+
+    def __call__(self, nvsim_state, command, sq, cq):
+        gf_cmd = GetFeature.from_buffer(command)
+        cmd_spec = 0
+
+        # Check which feature we are doing
+        if gf_cmd.FID == GetFeaturePowerManagement().FID:
+            gf_cmd = GetFeaturePowerManagement.from_buffer(command)
+
+            # Pretend PS = 1 until we implement state
+            response = FeaturePowerManagement()
+            response.PS = nvsim_state.power_state
+
+            # Get response and status code
+            cmd_spec = (ctypes.c_uint32).from_buffer(response)
+            status_code = status_codes['Successful Completion']
+        else:
+            assert f'FID: 0x{gf_cmd.FID:x} not supported!'
+
+        # Respond to the command
+        self.complete(command, sq, cq, status_code, cmd_spec)
+
+
+class NVSimSetFeature:
+    OPC = SetFeature().OPC
+
+    def __call__(self, nvsim_state, command, sq, cq):
+        sf_cmd = SetFeature.from_buffer(command)
+
+        if sf_cmd.FID == SetFeaturePowerManagement().FID:
+            sf_cmd = SetFeaturePowerManagement.from_buffer(command)
+            nvsim_state.power_state = sf_cmd.PS
+            assert sf_cmd.SV == 0, 'SV set not yet supported'
+            status_code = status_codes['Successful Completion']
+
+        # Respond to the command
+        self.complete(command, sq, cq, status_code)
+
+
 # Create our admin command handlers object. Can you do this with introspection??
 admin_handlers = NvsimCommandHandlers()
 for handler in [
@@ -240,5 +285,7 @@ for handler in [
     NVSimDeleteIOSubmissionQueue,
     NVSimGetLogPage,
     NVSimFormat,
+    NVSimGetFeature,
+    NVSimSetFeature,
 ]:
     admin_handlers.register(handler)

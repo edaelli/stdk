@@ -5,7 +5,7 @@ from lone.nvme.spec.structures import ADMINCommand
 from lone.nvme.spec.commands.status_codes import NVMeStatusCode, status_codes
 
 
-class GetFeature(ADMINCommand):
+class __GetFeature(ADMINCommand):
 
     class Select(enum.Enum):
         CURRENT = 0
@@ -37,7 +37,7 @@ get_feature_status_codes = [
 ]
 
 
-class SetFeature(ADMINCommand):
+class __SetFeature(ADMINCommand):
 
     _pack_ = 1
     _fields_1_ = [
@@ -71,11 +71,11 @@ set_feature_status_codes = [
 def FeatureFactory(feature_info, data_in=None, data_out=None):
 
     # Get Features
-    defaults = copy.deepcopy(GetFeature._defaults_)
+    defaults = copy.deepcopy(__GetFeature._defaults_)
     defaults['FID'] = feature_info.fid
-    fields = (GetFeature._fields_1_ +
+    fields = (__GetFeature._fields_1_ +
               feature_info.get_fields +
-              GetFeature._fields_2_)
+              __GetFeature._fields_2_)
 
     # Create the class
     get_cls = type(f'Get{feature_info.__name__}', (ADMINCommand,), {
@@ -94,12 +94,12 @@ def FeatureFactory(feature_info, data_in=None, data_out=None):
     get_cls.response = _response
 
     # Set Features
-    defaults = copy.deepcopy(SetFeature._defaults_)
+    defaults = copy.deepcopy(__SetFeature._defaults_)
     defaults['FID'] = feature_info.fid
-    fields = (SetFeature._fields_1_ +
+    fields = (__SetFeature._fields_1_ +
               feature_info._fields_ +
               feature_info.set_fields +
-              SetFeature._fields_2_)
+              __SetFeature._fields_2_)
 
     # Create the class
     set_cls = type(f'Set{feature_info.__name__}', (ADMINCommand,), {
@@ -114,6 +114,25 @@ def FeatureFactory(feature_info, data_in=None, data_out=None):
 
     # Return our created class
     return get_cls, set_cls
+
+
+class FeatureGeneric(ctypes.Structure):
+    fid = 0x00
+    _fields_ = [
+        ('RSVD_0', ctypes.c_uint32),
+    ]
+    get_fields = [
+        ('DW11', ctypes.c_uint32),
+        ('DW12', ctypes.c_uint32),
+        ('DW13', ctypes.c_uint32),
+    ]
+    set_fields = [
+        ('DW12', ctypes.c_uint32),
+        ('DW13', ctypes.c_uint32),
+    ]
+
+
+GetFeature, SetFeature = FeatureFactory(FeatureGeneric)
 
 
 class FeatureArbitration(ctypes.Structure):

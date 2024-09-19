@@ -253,7 +253,10 @@ class SysVfioIfc(SysPciUserspaceDevice):
 
         # Open the container
         self.container_fd = os.open(self.container_path, os.O_RDWR)
-        self.group_fd = os.open('/dev/vfio/{}'.format(self.iommu_group), os.O_RDWR)
+        self.group_fd_path = '/dev/vfio/{}'.format(self.iommu_group)
+        if not os.path.exists(self.group_fd_path):
+            raise Exception('Device does not exist')
+        self.group_fd = os.open(self.group_fd_path, os.O_RDWR)
 
         # Check the API version support
         api_version = VfioGetApiVersion().ioctl(self.container_fd)

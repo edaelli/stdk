@@ -68,6 +68,14 @@ class NVSimState:
         self.mps = nvme_device.mem_mgr.page_size
         self.injectors = nvme_device.injectors
 
+        self.initialize()
+
+        # Power state, init to 0. TODO: Add full features here and ability to
+        #   save to disk and restore
+        self.power_state = 0
+
+    def initialize(self):
+
         self.queue_mgr = QueueMgr()
 
         # Stores completion queues from CreateIOCompletionQueue commands that
@@ -87,10 +95,12 @@ class NVSimState:
         self.namespaces.append(NVSimNamespace(4, 4096, '/tmp/ns_4.dat'))
 
     def init_pcie_regs(self):
+        ctypes.memset(ctypes.addressof(self.pcie_regs), 0, ctypes.sizeof(self.pcie_regs))
         self.pcie_regs.ID.VID = 0xEDDA
         self.pcie_regs.ID.DID = 0xE111
 
     def init_nvme_regs(self):
+        ctypes.memset(ctypes.addressof(self.nvme_regs), 0, ctypes.sizeof(self.nvme_regs))
         self.nvme_regs.CAP.CSS = 0x40
         self.nvme_regs.VS.MJR = 0x02
         self.nvme_regs.VS.MNR = 0x01
@@ -134,6 +144,19 @@ class NVSimState:
         id_ctrl_data.MN = b'nvsim_0.1'
         id_ctrl_data.SN = b'EDDAE771'
         id_ctrl_data.FR = b'0.001'
+
+        # Power states
+        id_ctrl_data.NPSS = 5
+        id_ctrl_data.PSDS[0].MXPS = 0
+        id_ctrl_data.PSDS[0].MP = 2500
+        id_ctrl_data.PSDS[1].MXPS = 0
+        id_ctrl_data.PSDS[1].MP = 2200
+        id_ctrl_data.PSDS[2].MXPS = 0
+        id_ctrl_data.PSDS[2].MP = 2000
+        id_ctrl_data.PSDS[3].MXPS = 0
+        id_ctrl_data.PSDS[3].MP = 1500
+        id_ctrl_data.PSDS[4].MXPS = 0
+        id_ctrl_data.PSDS[4].MP = 1000
 
         return id_ctrl_data
 

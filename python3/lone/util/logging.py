@@ -2,7 +2,7 @@ import logging
 
 
 # Default format for all logs
-log_format = '[%(asctime)s]  %(name)16s %(levelname)8s - %(message)s'
+log_format = '[%(asctime)s] %(filename)10s %(lineno)4d %(levelname)8s - %(message)s'
 
 # Common logging config
 logging.basicConfig(format=log_format)

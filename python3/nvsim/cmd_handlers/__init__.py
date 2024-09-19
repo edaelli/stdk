@@ -18,7 +18,7 @@ class NvsimCommandHandlers:
 
 class NvsimCommandHandler:
 
-    def complete(self, command, sq, cq, status_code):
+    def complete(self, command, sq, cq, status_code, cmd_spec=0):
         # Complete the command
         cqe = CQE()
         cqe.CID = command.CID
@@ -27,6 +27,7 @@ class NvsimCommandHandler:
         cqe.SF.SC = int(status_code)
         cqe.SQID = sq.qid
         cqe.SQHD = sq.head.value
+        cqe.CMD_SPEC = cmd_spec
         cq.post_completion(cqe)
 
         if status_code.failure:

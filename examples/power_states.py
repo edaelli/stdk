@@ -1,6 +1,6 @@
 import argparse
 
-from lone.nvme.device import NVMeDevicePhysical
+from lone.nvme.device import NVMeDevice
 from lone.nvme.spec.commands.admin.identify import IdentifyController
 from lone.nvme.spec.commands.admin.get_set_feature import (GetFeaturePowerManagement,
                                                            SetFeaturePowerManagement)
@@ -13,15 +13,13 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     # Create NVMe device and initialize it (only need admin queues)
-    nvme_device = NVMeDevicePhysical(args.pci_slot)
+    nvme_device = NVMeDevice(args.pci_slot)
     nvme_device.init_admin_queues(asq_entries=16, acq_entries=16)
     nvme_device.cc_enable()
+    nvme_device.id_data.initialize()
 
-    # Get the IdentifyController data in (CNS=1)
-    id_cmd = IdentifyController()
-    nvme_device.alloc(id_cmd)
-    nvme_device.sync_cmd(id_cmd)
-    id_ctrl_data = id_cmd.data_in
+    # Get identify controller data
+    id_ctrl_data = nvme_device.id_data.controller
 
     # Print all power states reported by the device first
     print('Power States:')

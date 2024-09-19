@@ -90,6 +90,11 @@ class NVMeDeviceCommon:
         #   requests it
         self.id_data = NVMeDeviceIdentifyData(self, initialize=False)
 
+    def initiate_flr(self):
+        pcie_cap = [cap for cap in self.pcie_regs.capabilities if
+                    cap._cap_id_ is self.pcie_regs.PCICapExpress._cap_id_][0]
+        pcie_cap.PXDC.IFLR = 1
+
     def cc_disable(self, timeout_s=10):
         start_time = time.time()
 
@@ -523,13 +528,26 @@ def NVMeDevice(pci_slot):
         return NVMeDevicePhysical(pci_slot)
 
 
+class NVMeDevicePhysicalNotFoundError(Exception):
+    pass
+
+
 class NVMeDevicePhysical(NVMeDeviceCommon):
     ''' Implementation that accesses a physical nvme device on the
           pcie bus via vfio
     '''
     def __init__(self, pci_slot):
         # Create a pci_userspace_device, then get pcie and nvme regs
-        pci_userspace_device = System.PciUserspaceDevice(pci_slot)
+        device_found = False
+        try:
+            pci_userspace_device = System.PciUserspaceDevice(pci_slot)
+            device_found = True
+        except Exception as e:
+            e
+
+        # Raise exception if we didn't find a device at pci_slot
+        if not device_found:
+            raise NVMeDevicePhysicalNotFoundError(f'Not able to access {pci_slot}')
 
         pci_regs = pci_userspace_device.pci_regs()
         pci_regs.init_capabilities()

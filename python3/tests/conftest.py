@@ -15,6 +15,8 @@ from lone.nvme.device import NVMeDeviceCommon
 @pytest.fixture(scope='function')
 def mocked_nvme_device(mocker):
     pcie_regs = PCIeRegistersDirect()
+    pcie_regs.capabilities = [PCIeRegistersDirect.PCICapExpress()]
+
     nvme_regs = NVMeRegistersDirect()
 
     class MockedMemMgr(DevMemMgr):
