@@ -1,7 +1,7 @@
 import pytest
 import ctypes
 
-from lone.util import logging
+from lone.util.logging import log_init, log_get
 from lone.util.hexdump import hexdump, hexdump_print
 from lone.util.struct_tools import ComparableStruct, StructFieldsIterator
 from lone.util.lba_gen import LBARandGenLFSR
@@ -80,7 +80,11 @@ def test_struct_field_iterator():
 
 
 def test_logging():
-    logging
+    logger = log_init()
+    logger.info('testing log')
+
+    logger = log_get()
+    logger.info('testing log')
 
 
 def test_lba_gen():

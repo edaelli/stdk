@@ -2,9 +2,7 @@ import os
 import pytest
 import yaml
 
-
-import logging
-logger = logging.getLogger('nvtest_conftest')
+from lone.util.logging import log_init
 
 
 def pytest_addoption(parser):
@@ -40,6 +38,7 @@ def pytest_configure(config):
 
 
 def pytest_collection_modifyitems(session, config, items):
+    logger = log_init()
 
     # Get config path if passed in to figure out what tests to run
     config_path = config.getoption('config')
@@ -90,6 +89,13 @@ def pytest_collection_modifyitems(session, config, items):
 
 
 @pytest.fixture(scope='session')
+def lone_logger():
+    # Get a logger and return it
+    logger = log_init()
+    return logger
+
+
+@pytest.fixture(scope='session')
 def lone_config(pytestconfig):
 
     class LoneConfig:
@@ -113,24 +119,24 @@ def lone_config(pytestconfig):
 
 
 def cleanup(nvme_device):
-    # Disabling will free all memory used by the device
+    # Disabling then free all memory used by a test
     nvme_device.cc_disable()
+    nvme_device.mem_mgr.free_all()
 
     # Remove references to nvme_regs before we try to clean the device
     del nvme_device.nvme_regs
 
-    # Special nvsim handling TODO Make this an interface function instead!
-    if nvme_device.pci_slot == 'nvsim':
+    # Real device specific cleanup
+    if nvme_device.pci_slot != 'nvsim':
+        nvme_device.pci_userspace_device.clean()
+
+    # Nvsim specific cleanup
+    elif nvme_device.pci_slot == 'nvsim':
         nvme_device.sim_thread.stop()
         nvme_device.sim_thread.join()
-    else:
-        nvme_device.pci_userspace_dev_ifc.clean()
 
-    # Free any memory left by the test, but warn about it
-    if len(nvme_device.mem_mgr.allocated_mem_list()):
-        logger.info('Tests exited without freeing all memory!!!')
-        for m in nvme_device.mem_mgr.allocated_mem_list():
-            logger.info('{} 0x{:x} 0x{:x}'.format(m.client, m.vaddr, m.iova))
+    else:
+        pytest.fail('invalid device type')
 
 
 @pytest.fixture(scope='function')
@@ -151,7 +157,7 @@ def nvme_device_raw(lone_config):
 
 
 @pytest.fixture(scope='function')
-def nvme_device(request, lone_config):
+def nvme_device(request, lone_config, lone_logger):
     from lone.nvme.device import NVMeDevice
 
     assert 'dut' in lone_config, (
@@ -179,11 +185,18 @@ def nvme_device(request, lone_config):
         io_queue_entries = request.param['io_queue_entries']
 
     try:
-        # Disable, create queues, get namespace information
+        # Disable, create admin queues
         nvme_device.cc_disable()
         nvme_device.init_admin_queues(asq_entries=asq_entries, acq_entries=acq_entries)
+
+        # Enable, get id information, create io queues
         nvme_device.cc_enable()
         nvme_device.create_io_queues(num_queues=num_io_queues, queue_entries=io_queue_entries)
+        try:
+            nvme_device.id_data.initialize()
+        except Exception as e:
+            lone_logger.exception(e)
+            lone_logger.info('Not able to initialize identify data for device')
 
         yield nvme_device
 

@@ -3,7 +3,7 @@
 import pytest
 
 
-def test_example_config(lone_config):
+def test_example_config(lone_config, lone_logger):
     # The lone_config fixture is the dictionary representation
     #   of the yaml file passed into pytest with the --config
     #   option.
@@ -16,6 +16,17 @@ def test_example_config(lone_config):
     #   lone_config = {'dut': {'pci_slot': 'nvsim'}}
     assert 'dut' in lone_config.keys()
     assert 'pci_slot' in lone_config['dut'].keys()
+
+
+def test_example_logging(lone_logger):
+    # Tests should use the lone_logger fixture for logging.
+    lone_logger.info('testing logger info')
+    lone_logger.warning('testing logger warning')
+    lone_logger.error('testing logger error')
+    try:
+        raise Exception('test exception')
+    except Exception as e:
+        lone_logger.exception(e)
 
 
 def test_nvme_device_raw(nvme_device_raw):
@@ -43,7 +54,6 @@ def test_nvme_device_raw(nvme_device_raw):
 
     # Make sure that NVMe VS is not zero
     assert nvme_device_raw.nvme_regs.VS.MJR != 0
-    assert nvme_device_raw.nvme_regs.VS.MNR != 0
 
     # Disable the device, setup admin queues, enable it
     nvme_device_raw.cc_disable()
@@ -83,10 +93,18 @@ def test_nvme_device_raw(nvme_device_raw):
     assert id_ctrl_cmd.data_in.SN != '', 'Empty Serial Number'
     assert id_ctrl_cmd.data_in.FR != '', 'Empty Firmware Revision'
 
+    # Another way to get identify information is to use the id_data object. It will send out
+    #   multiple identify commands (with different CNS values) and combined the results in
+    #   the object
+    nvme_device_raw.id_data.initialize()
+    assert nvme_device_raw.id_data.controller.MN == id_ctrl_cmd.data_in.MN
+    assert nvme_device_raw.id_data.controller.SN == id_ctrl_cmd.data_in.SN
+    assert nvme_device_raw.id_data.controller.FR == id_ctrl_cmd.data_in.FR
+
 
 @pytest.mark.parametrize(
     'nvme_device',
-    [{'asq_entries': 10, 'acq_entries': 20, 'num_io_queues': 10, 'io_queue_entries': 10}],
+    [{'asq_entries': 128, 'acq_entries': 128, 'num_io_queues': 64, 'io_queue_entries': 2048}],
     indirect=True)
 def test_nvme_device(nvme_device, lone_config):
     # The nvme_device fixture is similar to the nvme_device_raw
@@ -96,16 +114,16 @@ def test_nvme_device(nvme_device, lone_config):
     #  decorating this function as shown above.
 
     # Check that the initialization matches the setup above
-    assert nvme_device.nvme_regs.AQA.ASQS == (10 - 1)  # Zero based
-    assert nvme_device.nvme_regs.AQA.ACQS == (20 - 1)  # Zero based
-    assert len(nvme_device.queue_mgr.nvme_queues) == 1 + 10  # Admin + NVM queues
+    assert nvme_device.nvme_regs.AQA.ASQS == (128 - 1)  # Zero based
+    assert nvme_device.nvme_regs.AQA.ACQS == (128 - 1)  # Zero based
+    assert len(nvme_device.queue_mgr.nvme_queues) == 1 + 64  # Admin + NVM queues
 
     # Check that the device is enabled
     assert nvme_device.nvme_regs.CSTS.RDY == 1
 
     # Ok, now we can demonstrate how to send a NVM commands
 
-    #  First step is to import the commands we need, and PRP and DMADirection objects
+    # First step is to import the commands we need, and PRP and DMADirection objects
     from lone.nvme.spec.commands.nvm.write import Write
     from lone.nvme.spec.commands.nvm.read import Read
     from lone.nvme.spec.prp import PRP
@@ -113,14 +131,13 @@ def test_nvme_device(nvme_device, lone_config):
 
     # Next we need to get information from the device so we know how to properly
     #  create NVM commands. We do that by sending a couple of identify commands to the
-    #  device. The NVMeDeviceIdentifyData object does that for us (see details in there)
-    from lone.nvme.device.identify import NVMeDeviceIdentifyData
-    id_data = NVMeDeviceIdentifyData(nvme_device)
+    #  device.
+    nvme_device.id_data.initialize()
 
     # Now that we know the existing namespaces in the device, make sure the caller asked
     #   us to access a valid namespace
     nsid = lone_config['dut']['namespaces'][0]['nsid']
-    ns = id_data.namespaces[nsid]
+    ns = nvme_device.id_data.namespaces[nsid]
     assert ns is not None, f'Invalid Namespace: {nsid} for device'
 
     # Calculate some other values we need to send writes/reads

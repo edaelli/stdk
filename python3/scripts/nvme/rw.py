@@ -7,7 +7,6 @@ import logging
 from lone.nvme.device import NVMeDevice
 
 # Import NVMe spec objects we will use for commands
-from lone.nvme.device.identify import NVMeDeviceIdentifyData
 from lone.nvme.spec.commands.nvm.read import Read
 from lone.nvme.spec.commands.nvm.write import Write
 from lone.nvme.spec.prp import PRP
@@ -38,9 +37,7 @@ def main():
     nvme_device.cc_disable()
     nvme_device.init_admin_queues(asq_entries=16, acq_entries=16)
     nvme_device.cc_enable()
-
-    # Get identify data from the device
-    id_data = NVMeDeviceIdentifyData(nvme_device)
+    nvme_device.id_data.initialize()
 
     num_io_queues = 1
     io_queues_depth = 256
@@ -48,7 +45,7 @@ def main():
     nvme_device.create_io_queues(num_io_queues, io_queues_depth)
 
     # Get the namespace's information
-    ns = id_data.namespaces[args.namespace]
+    ns = nvme_device.id_data.namespaces[args.namespace]
 
     # Make sure the namespace is valid
     assert ns is not None, 'NSID: {} is not valid on the drive'.format(args.namespace)

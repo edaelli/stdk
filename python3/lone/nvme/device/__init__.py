@@ -12,6 +12,7 @@ from lone.nvme.spec.commands.admin.create_io_submission_q import CreateIOSubmiss
 from lone.nvme.spec.commands.admin.delete_io_completion_q import DeleteIOCompletionQueue
 from lone.nvme.spec.commands.admin.delete_io_submission_q import DeleteIOSubmissionQueue
 from lone.nvme.spec.commands.status_codes import status_codes
+from lone.nvme.device.identify import NVMeDeviceIdentifyData
 
 import logging
 logger = logging.getLogger('nvme_device')
@@ -84,6 +85,10 @@ class NVMeDeviceCommon:
         # Interrupt type for this drive, None is polling
         self.int_type = NVMeDeviceIntType.POLLING
         self.get_completions = self.poll_cq_completions
+
+        # Identify data for the device, no init until the user
+        #   requests it
+        self.id_data = NVMeDeviceIdentifyData(self, initialize=False)
 
     def cc_disable(self, timeout_s=10):
         start_time = time.time()
@@ -513,7 +518,7 @@ def NVMeDevice(pci_slot):
     '''
     if pci_slot == 'nvsim':
         from nvsim import NVMeSimulator
-        return NVMeSimulator(pci_slot)
+        return NVMeSimulator('nvsim')
     else:
         return NVMeDevicePhysical(pci_slot)
 

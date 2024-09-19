@@ -7,7 +7,6 @@ import subprocess
 import pathlib
 import pyudev
 import mmap
-import time
 
 from lone.system import SysPciUserspace, SysPciUserspaceDevice
 from lone.nvme.spec.registers.pcie_regs import (PCIeRegisters,
@@ -340,16 +339,6 @@ class SysVfioIfc(SysPciUserspaceDevice):
         req.ioctl(self.device_fd)
         self.rom_region = {'size': req.size, 'offset': req.offset, 'flags': req.flags}
 
-        # The reset below will likely result in an FLR from the vfio -> pcie driver in linux.
-        #   Some devices may not be happy with back-to-back FLR's where the second one happens
-        #   when the first one is still in progress (not really a spec thing, but a common bug
-        #   on devices). So wait at least 2x the time an FLR should take per spec here to try
-        #   our best to avoid it.
-        time.sleep(.200)
-
-        # Reset the device
-        self.reset()
-
     def get_irq_info(self, index=0):
         irq_info = vfioGetIRQInfo()
         irq_info.index = index
@@ -442,9 +431,6 @@ class SysVfioIfc(SysPciUserspaceDevice):
         # Cleanup the mmaped registers
         del self.nvme_registers
         self.nvme_mmap.close()
-
-        # Reset the device
-        self.reset()
 
         # Close the device fd and unset the container
         os.close(self.device_fd)

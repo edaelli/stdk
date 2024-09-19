@@ -185,10 +185,10 @@ class DevMemMgr(metaclass=abc.ABCMeta):
     def __str__(self):
         ret = ''
         if len(self.allocated_mem_list()):
-            ret = '{:<45} {:>18}   {:>10}     {:>8}  {:4}  {:4}  {}\n'.format(
+            ret = '{:<50} {:>18}   {:>10}     {:>8}  {:4}  {:4}  {}\n'.format(
                 'client', 'vaddr', 'iova', 'size', 'in_use', 'iova_mapped', 'direction')
             for m in self.allocated_mem_list():
-                ret += (f'{m.client:<45} 0x{m.vaddr:016X}   0x{m.iova:08X}   0x{m.size:08X}  '
+                ret += (f'{m.client:<50} 0x{m.vaddr:016X}   0x{m.iova:08X}   0x{m.size:08X}  '
                         f'{m.in_use:>6}  {m.iova_mapped:>11}  {m.iova_direction}\n')
         return ret
 
