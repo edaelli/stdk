@@ -49,5 +49,6 @@ def main():
 
     print(f'FLR complete on slot: {args.pci_slot}')
 
+
 if __name__ == '__main__':
     sys.exit(main())

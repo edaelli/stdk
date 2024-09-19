@@ -1,7 +1,6 @@
 import argparse
 
 from lone.nvme.device import NVMeDevice
-from lone.nvme.spec.commands.admin.identify import IdentifyController
 from lone.nvme.spec.commands.admin.get_set_feature import (GetFeaturePowerManagement,
                                                            SetFeaturePowerManagement)
 
