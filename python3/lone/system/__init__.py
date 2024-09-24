@@ -9,6 +9,10 @@ from enum import Enum
 
 from lone.util.hexdump import hexdump_print
 
+# Always import and enable faulthandler
+import faulthandler
+faulthandler.enable()
+
 
 class SysPci(metaclass=abc.ABCMeta):
     ''' Interface to access the PCI subsystem within an Operating System
