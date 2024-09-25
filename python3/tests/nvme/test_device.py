@@ -10,7 +10,7 @@ from lone.nvme.spec.commands.admin.identify import (IdentifyNamespaceListData,
                                                     IdentifyNamespaceData)
 from lone.nvme.spec.commands.status_codes import NVMeStatusCodeException
 
-from nvsim import NVMeSimulator
+from nvsim import NVMeSimulatorGenericNVM
 
 
 ####################################################################################################
@@ -459,7 +459,7 @@ def test_delete(mocked_nvme_device):
 ####################################################################################################
 def test_nvme_device(mocker):
     # Test that we get the right type of device when using nvsim and a real pcie device
-    assert type(NVMeDevice('nvsim')) is NVMeSimulator
+    assert type(NVMeDevice('nvsim')) is NVMeSimulatorGenericNVM
 
     mocker.patch('lone.nvme.device.NVMeDevicePhysical.__init__', lambda x, y: None)
     assert type(NVMeDevice('test_slot')) is NVMeDevicePhysical

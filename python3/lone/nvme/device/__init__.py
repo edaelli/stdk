@@ -54,7 +54,6 @@ class NVMeDeviceCommon:
 
     def __init__(self,
                  pci_slot,
-                 pci_userspace_device,
                  pcie_regs,
                  nvme_regs,
                  mem_mgr,
@@ -63,7 +62,6 @@ class NVMeDeviceCommon:
 
         # Save values passed in
         self.pci_slot = pci_slot
-        self.pci_userspace_device = pci_userspace_device
         self.pcie_regs = pcie_regs
         self.nvme_regs = nvme_regs
         self.mem_mgr = mem_mgr
@@ -522,8 +520,8 @@ def NVMeDevice(pci_slot):
         as a real device in the pci bus
     '''
     if pci_slot == 'nvsim':
-        from nvsim import NVMeSimulator
-        return NVMeSimulator('nvsim')
+        from nvsim import NVMeSimulatorGenericNVM
+        return NVMeSimulatorGenericNVM()
     else:
         return NVMeDevicePhysical(pci_slot)
 
