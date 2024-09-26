@@ -2,7 +2,7 @@ import ctypes
 import traceback
 
 from lone.nvme.device import NVMeDeviceCommon
-from nvsim_2.simulators import NVSimInterface
+from nvsim_2.simulators import NVSimInterface, NVSimCommandNotSupported
 from nvsim_2.simulators.nvsim_thread import NVSimThread
 from nvsim_2.reg_handlers.pcie import PCIeRegChangeHandler
 from nvsim_2.reg_handlers.nvme import NVMeRegChangeHandler
@@ -11,17 +11,15 @@ from lone.nvme.spec.registers.nvme_regs import NVMeRegistersDirect
 from nvsim_2.memory import SimMemMgr
 from lone.nvme.spec.queues import QueueMgr, NVMeSubmissionQueue, NVMeCompletionQueue
 from lone.system import MemoryLocation
-
-from lone.nvme.spec.commands.admin.identify import IdentifyController
 from lone.nvme.spec.commands.admin.identify import (IdentifyNamespaceData,
                                                     IdentifyControllerData,
                                                     IdentifyNamespaceListData,
                                                     IdentifyUUIDListData)
-from lone.nvme.spec.structures import CQE
 from lone.nvme.spec.structures import Generic
 
 from lone.util.logging import log_init
 logger = log_init()
+
 
 class GenericNVMeNVSimConfig:
     @staticmethod
@@ -134,23 +132,25 @@ class GenericNVMeNVSimConfig:
 
         return id_ctrl_data
 
-    def cmd_not_supported_handler(nvsim, command, sq, cq):
-        cqe = CQE()
-        cqe.CID = command.CID
-        cqe.SF.SC = 0x02
-        cqe.SQID = sq.qid
-        cqe.SQHD = sq.head.value
-        cqe.CMD_SPEC = 0
-        cq.post_completion(cqe)
-        logger.error(f'Command OPC 0x{command.OPC:x} not supported')
-
     @staticmethod
     def admin_cmd_handlers():
-        return [GenericNVMeNVSimConfig.cmd_not_supported_handler] * 255
+        # Start with nothing supported
+        handlers = [NVSimCommandNotSupported()] * 255
+
+        # Override the ones this simulator supports
+
+        # Return list of handlers, OPC for index
+        return handlers
 
     @staticmethod
     def nvm_cmd_handlers():
-        return [GenericNVMeNVSimConfig.cmd_not_supported_handler] * 255
+        # Start with nothing supported
+        handlers = [NVSimCommandNotSupported()] * 255
+
+        # Override the ones this simulator supports
+
+        # Return list of handlers, OPC for index
+        return handlers
 
 class GenericNVMeNVSim(NVSimInterface):
 
@@ -353,6 +353,8 @@ class GenericNVMeNVSimDevice(NVMeDeviceCommon):
 
 
 if __name__ == '__main__':
+
+    from lone.nvme.spec.commands.admin.identify import IdentifyController
 
     # This changes and reacts to register/memory changes as a device
     n = GenericNVMeNVSim()
