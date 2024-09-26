@@ -1,5 +1,6 @@
 import ctypes
 import traceback
+import mmap
 
 from nvsim_2.simulators import NVSimInterface
 from lone.nvme.device import NVMeDeviceCommon
@@ -17,46 +18,130 @@ from lone.nvme.spec.commands.admin.identify import (IdentifyNamespaceData,
                                                     IdentifyNamespaceListData,
                                                     IdentifyUUIDListData)
 from lone.nvme.spec.structures import Generic
-from nvsim_2.cmd_handlers.admin import NVSimIdentify
+from nvsim_2.cmd_handlers.admin import (NVSimIdentify,
+                                        NVSimCreateIOCompletionQueue,
+                                        NVSimCreateIOSubmissionQueue,
+                                        NVSimDeleteIOCompletionQueue,
+                                        NVSimDeleteIOSubmissionQueue,
+                                        NVSimGetLogPage,
+                                        NVSimFormat,
+                                        NVSimGetFeature,
+                                        NVSimSetFeature)
 
+from nvsim_2.cmd_handlers.nvm import (NVSimWrite,
+                                      NVSimRead,
+                                      NVSimFlush)
+
+import logging
 from lone.util.logging import log_init
-logger = log_init()
+logger = log_init(level=logging.DEBUG)
+
+class GenericNVMeNVSimNamespace:
+
+    def __init__(self, num_gbs, block_size, path='/tmp/nvsim.dat'):
+        self.num_gbs = num_gbs
+        self.block_size = block_size
+        self.path = path
+
+        if self.block_size == 512:
+            self.num_lbas = int(97696368 + (1953504 * (int(num_gbs) - 50.0)))
+        elif self.block_size == 4096:
+            self.num_lbas = int(12212046 + (244188 * (int(num_gbs) - 50.0)))
+        else:
+            assert False, '{} block size not supported'.format(self.block_size)
+
+        self.init_storage()
+
+    def init_storage(self):
+        # Create the file
+        self.fh = open(self.path, 'w+b')
+        self.fh.seek((self.num_lbas * self.block_size) - 1)
+        self.fh.write(b'\0')
+        self.fh.flush()
+
+        # Mmap so we can easily access
+        self.mm = mmap.mmap(self.fh.fileno(), 0)
+
+    def idema_size_512(self, num_gbs):
+        return int(97696368 + (1953504 * (int(num_gbs) - 50.0)))
+
+    def idema_size_4096(self, num_gbs):
+        return int(12212046 + (244188 * (int(num_gbs) - 50.0)))
+
+    def read(self, lba, num_blocks, prp):
+        start_byte = (lba * self.block_size)
+        end_byte = start_byte + (num_blocks * self.block_size)
+        prp.set_data_buffer(self.mm[start_byte:end_byte])
+
+    def write(self, lba, num_blocks, prp):
+        start_byte = (lba * self.block_size)
+        end_byte = start_byte + (num_blocks * self.block_size)
+        self.mm[start_byte:end_byte] = prp.get_data_buffer()[:(self.block_size * num_blocks)]
+
+    def __del__(self):
+        self.mm.close()
+        self.fh.close()
 
 
 class GenericNVMeNVSimConfig:
-    @staticmethod
-    def init_pcie_capabilities(pcie_regs):
+
+    def __init__(self, pcie_regs, nvme_regs):
+        self.pcie_regs = pcie_regs
+        self.nvme_regs = nvme_regs
+
+        # Clear registers
+        ctypes.memset(ctypes.addressof(self.pcie_regs), 0, ctypes.sizeof(self.pcie_regs))
+        ctypes.memset(ctypes.addressof(self.nvme_regs), 0, ctypes.sizeof(self.nvme_regs))
+
+        # Initialize ourselves
+        self.init_pcie_capabilities()
+        self.init_pcie_regs()
+        self.init_nvme_regs()
+        self.init_identify_controller()
+        self.init_namespaces()
+
+        self.init_cmd_handlers()
+
+        # Keep a QueueMgr object to track our internal queues
+        self.queue_mgr = QueueMgr()
+
+        # Completion queues are added here until a submission queue uses it (the queue
+        #   manager takes in pairs of queues, so we have to wait for the create submission
+        #   queue command to come in to add it).
+        self.completion_queues = []
+
+    def init_pcie_capabilities(self):
         # Initialize pcie capabilities we support
 
         # Power management interface capability
-        cap_power_mgmt_ifc = pcie_regs.PCICapPowerManagementInterface()
+        cap_power_mgmt_ifc = self.pcie_regs.PCICapPowerManagementInterface()
 
         # MSI capability
-        cap_msi = pcie_regs.PCICapMSI()
+        cap_msi = self.pcie_regs.PCICapMSI()
 
         # PCICap capability
-        cap_express = pcie_regs.PCICapExpress()
+        cap_express = self.pcie_regs.PCICapExpress()
 
         # MSIX capability
-        cap_msix = pcie_regs.PCICapMSIX()
+        cap_msix = self.pcie_regs.PCICapMSIX()
 
         # Extended AER capability
-        cap_ext_aer = pcie_regs.PCICapExtendedAer()
+        cap_ext_aer = self.pcie_regs.PCICapExtendedAer()
 
         # Extended SN capability
-        cap_ext_sn = pcie_regs.PCICapExtendeDeviceSerialNumber()
+        cap_ext_sn = self.pcie_regs.PCICapExtendeDeviceSerialNumber()
 
         # Now arrange them into the CAP registers as a linked list
-        pcie_regs.CAP.CP = type(pcie_regs).CAPS.offset
-        next_ptr = pcie_regs.CAP.CP
-        next_addr = ctypes.addressof(pcie_regs) + next_ptr
+        self.pcie_regs.CAP.CP = type(self.pcie_regs).CAPS.offset
+        next_ptr = self.pcie_regs.CAP.CP
+        next_addr = ctypes.addressof(self.pcie_regs) + next_ptr
 
         for cap in [cap_power_mgmt_ifc,
                     cap_msi,
                     cap_express,
                     cap_msix]:
             # Make sure it is a generic capability
-            assert pcie_regs.PCICapability in type(cap).__bases__
+            assert self.pcie_regs.PCICapability in type(cap).__bases__
 
             # First copy the cap to the register location
             ctypes.memmove(next_addr, ctypes.addressof(cap), ctypes.sizeof(cap))
@@ -79,7 +164,7 @@ class GenericNVMeNVSimConfig:
                     cap_ext_sn]:
 
             # Make sure it is a generic capability
-            assert pcie_regs.PCICapabilityExt in type(cap).__bases__
+            assert self.pcie_regs.PCICapabilityExt in type(cap).__bases__
 
             # First copy the cap to the register location
             ctypes.memmove(next_addr, ctypes.addressof(cap), ctypes.sizeof(cap))
@@ -98,82 +183,149 @@ class GenericNVMeNVSimConfig:
 
         # Read our capabilities into a list of capabilities so we can easily
         #  access them when needed
-        pcie_regs.init_capabilities()
+        self.pcie_regs.init_capabilities()
 
-    @staticmethod
-    def init_pcie_regs(pcie_regs):
-        pcie_regs.ID.VID = 0xEDDA
-        pcie_regs.ID.DID = 0xE771
+    def init_pcie_regs(self):
+        self.pcie_regs.ID.VID = 0xEDDA
+        self.pcie_regs.ID.DID = 0xE771
 
-    @staticmethod
-    def init_nvme_regs(nvme_regs):
-        nvme_regs.CAP.CSS = 0x40
-        nvme_regs.VS.MJR = 0x02
-        nvme_regs.VS.MNR = 0x01
+    def init_nvme_regs(self):
+        self.mps = 4096  # TODO: set it in the regs as well
 
-    @staticmethod
-    def init_id_ctrl_data():
-        id_ctrl_data = IdentifyControllerData()
+        self.nvme_regs.CAP.CSS = 0x40
+        self.nvme_regs.VS.MJR = 0x02
+        self.nvme_regs.VS.MNR = 0x01
 
-        id_ctrl_data.MN = b'nvsim_0.1'
-        id_ctrl_data.SN = b'EDDAE771'
-        id_ctrl_data.FR = b'0.001'
+    def init_identify_controller(self):
+        self.id_ctrl_data = IdentifyControllerData()
+
+        self.id_ctrl_data.MN = b'nvsim_0.1'
+        self.id_ctrl_data.SN = b'EDDAE771'
+        self.id_ctrl_data.FR = b'0.001'
 
         # Power states
-        id_ctrl_data.NPSS = 5
-        id_ctrl_data.PSDS[0].MXPS = 0
-        id_ctrl_data.PSDS[0].MP = 2500
-        id_ctrl_data.PSDS[1].MXPS = 0
-        id_ctrl_data.PSDS[1].MP = 2200
-        id_ctrl_data.PSDS[2].MXPS = 0
-        id_ctrl_data.PSDS[2].MP = 2000
-        id_ctrl_data.PSDS[3].MXPS = 0
-        id_ctrl_data.PSDS[3].MP = 1500
-        id_ctrl_data.PSDS[4].MXPS = 0
-        id_ctrl_data.PSDS[4].MP = 1000
+        self.power_state = 0
+        self.id_ctrl_data.NPSS = 5
+        self.id_ctrl_data.PSDS[0].MXPS = 0
+        self.id_ctrl_data.PSDS[0].MP = 2500
+        self.id_ctrl_data.PSDS[1].MXPS = 0
+        self.id_ctrl_data.PSDS[1].MP = 2200
+        self.id_ctrl_data.PSDS[2].MXPS = 0
+        self.id_ctrl_data.PSDS[2].MP = 2000
+        self.id_ctrl_data.PSDS[3].MXPS = 0
+        self.id_ctrl_data.PSDS[3].MP = 1500
+        self.id_ctrl_data.PSDS[4].MXPS = 0
+        self.id_ctrl_data.PSDS[4].MP = 1000
 
-        return id_ctrl_data
+    def init_namespaces(self):
 
-    @staticmethod
-    def admin_cmd_handlers():
-        # Start with nothing supported
-        handlers = [NVSimCommandNotSupported()] * 255
+        # Initialize our namespaces
+        self.namespaces = [
+            None, # Namespace 0 is never valid
+            GenericNVMeNVSimNamespace(512, 4096, '/tmp/ns1.dat'),
+            GenericNVMeNVSimNamespace(960, 4096, '/tmp/ns2.dat'),
+        ]
 
-        # Override the ones this simulator supports
+        # Intialize IdentifyNamespaceData for each namespace
+        self.id_ns_data = [None]
 
-        # Return list of handlers, OPC for index
-        handlers[NVSimIdentify.OPC] = NVSimIdentify()
-        return handlers
+        for ns in self.namespaces[1:]:
+            data = IdentifyNamespaceData()
 
-    @staticmethod
-    def nvm_cmd_handlers():
-        # Start with nothing supported
-        handlers = [NVSimCommandNotSupported()] * 255
+            data.NSZE = ns.num_lbas
+            data.NCAP = ns.num_lbas
+            data.NUSE = 0
+            data.NSFEAT = 0
+            data.NLBAF = 2
+            data.FLBAS = 0 if ns.block_size == 512 else 1
+            data.MC = 0
+            data.DPC = 0
+            data.DPS = 0
+            data.NMIC = 0
+            data.RESCAP = 0
+            data.FPI = 0
+            data.DLFEAT = 0
+            data.NAWUN = 0
 
-        # Override the ones this simulator supports
+            # 2 supported 0 for 512, 1 for 4096
+            data.LBAF_TBL[0].MS = 0
+            data.LBAF_TBL[0].LBADS = 9
+            data.LBAF_TBL[0].RP = 0
 
-        # Return list of handlers, OPC for index
-        return handlers
+            data.LBAF_TBL[1].MS = 0
+            data.LBAF_TBL[1].LBADS = 12
+            data.LBAF_TBL[1].RP = 0
+
+            self.id_ns_data.append(data)
+
+        # Identify Namespace List Data
+        self.id_ns_list_data = IdentifyNamespaceListData()
+
+        # Add every namespace in self.namespaces to the list
+        #  0 is not a valid ns, so skip it.
+        for ns_id, ns in enumerate(self.namespaces[1:]):
+            self.id_ns_list_data.Identifiers[ns_id] = ns_id + 1
+
+        # Identify UUID List Data
+        self.id_uuid_list_data = IdentifyUUIDListData()
+
+        self.id_uuid_list_data.UUIDS[0].UUID[0] = 1
+        self.id_uuid_list_data.UUIDS[1].UUID[0] = 2
+        self.id_uuid_list_data.UUIDS[2].UUID[0] = 3
+        self.id_uuid_list_data.UUIDS[3].UUID[0] = 4
+        self.id_uuid_list_data.UUIDS[4].UUID[0] = 5
+        self.id_uuid_list_data.UUIDS[5].UUID[0] = 6
+        self.id_uuid_list_data.UUIDS[6].UUID[0] = 7
+        self.id_uuid_list_data.UUIDS[7].UUID[0] = 8
+        self.id_uuid_list_data.UUIDS[8].UUID[0] = 9
+        self.id_uuid_list_data.UUIDS[9].UUID[0] = 10
+        self.id_uuid_list_data.UUIDS[10].UUID[0] = 11
+        self.id_uuid_list_data.UUIDS[11].UUID[0] = 12
+        self.id_uuid_list_data.UUIDS[12].UUID[0] = 13
+        self.id_uuid_list_data.UUIDS[13].UUID[0] = 14
+        self.id_uuid_list_data.UUIDS[14].UUID[0] = 15
+        self.id_uuid_list_data.UUIDS[15].UUID[0] = 16
+
+    def init_cmd_handlers(self):
+        # ADMIN Commands
+        self.admin_cmd_handlers = [NVSimCommandNotSupported()] * 256
+
+        for cmd in [NVSimIdentify(),
+                    NVSimCreateIOCompletionQueue(),
+                    NVSimCreateIOSubmissionQueue(),
+                    NVSimDeleteIOCompletionQueue(),
+                    NVSimDeleteIOSubmissionQueue(),
+                    NVSimGetLogPage(),
+                    NVSimFormat(),
+                    NVSimGetFeature(),
+                    NVSimSetFeature(),
+                    ]:
+            self.admin_cmd_handlers[cmd.OPC] = cmd
+
+        # NVM Commands
+        self.nvm_cmd_handlers = [NVSimCommandNotSupported()] * 256
+        for cmd in [NVSimWrite(),
+                    NVSimRead(),
+                    NVSimFlush()]:
+            self.nvm_cmd_handlers[cmd.OPC] = cmd
+
 
 class GenericNVMeNVSim(NVSimInterface):
 
-    def __init__(self, config=GenericNVMeNVSimConfig):
-        # Save our config
-        self.config = config
+    def __init__(self, config_type=GenericNVMeNVSimConfig):
+        # Save config
+        self.config_type = config_type
 
-        # Create the object to access PCIe registers, and init cababilities
+        # Create the object to access PCIe registers
         self.pcie_regs = PCIeRegistersDirect()
 
         # Create the object to access NVMe registers
         self.nvme_regs = NVMeRegistersDirect()
 
-        # Set our MPS
-        self.mps = 4096
+        # Initialize config (and internal states) for the simulated device
+        self.config = self.config_type(self.pcie_regs, self.nvme_regs)
 
-        # Initialize internal states for the simulated device
-        self.initialize_internal_state()
-
-        # Set our callable handlers
+        # Set our handlers for the simulation thread
         self.pcie_handler = PCIeRegChangeHandler(self)
         self.nvme_handler = NVMeRegChangeHandler(self)
 
@@ -181,39 +333,17 @@ class GenericNVMeNVSim(NVSimInterface):
         self.thread = NVSimThread(self)
         self.thread.daemon = True
 
+        # Clear reset flag
+        self.reset = False
+
     def start(self):
         # Start the simulator thread, it will check the handlers
         #  and call our interfaces
         self.thread.start()
 
-    def initialize_internal_state(self):
-        # Clear registers
-        ctypes.memset(ctypes.addressof(self.pcie_regs), 0, ctypes.sizeof(self.pcie_regs))
-        ctypes.memset(ctypes.addressof(self.nvme_regs), 0, ctypes.sizeof(self.nvme_regs))
-
-        # Initialize our pcie capabilities
-        self.config.init_pcie_capabilities(self.pcie_regs)
-
-        # Initialize pcie registers
-        self.config.init_pcie_regs(self.pcie_regs)
-
-        # Initialize nvme registers
-        self.config.init_nvme_regs(self.nvme_regs)
-
-        # Initialize identify structures
-        self.id_ctrl_data = self.config.init_id_ctrl_data()
-
-        # Keep a QueueMgr object to track our internal queues
-        self.queue_mgr = QueueMgr()
-
-        # Completion queues are added here until a submission queue uses it (the queue
-        #   manager takes in pairs of queues, so we have to wait for the create submission
-        #   queue command to come in to add it).
-        self.completion_queues = []
-
-        # Simulated command handlers
-        self.admin_cmd_handlers = self.config.admin_cmd_handlers()
-        self.nvm_cmd_handlers = self.config.nvm_cmd_handlers()
+    def stop(self):
+        self.thread.stop()
+        self.thread.join()
 
     ###############################################################################################
     # NVSimInterface implementation for this device
@@ -239,7 +369,9 @@ class GenericNVMeNVSim(NVSimInterface):
             if old_cap != new_cap:
                 if type(new_cap) == new_pcie_regs.PCICapExpress:
                     if old_cap.PXDC.IFLR == 0 and new_cap.PXDC.IFLR == 1:
-                        print('Initiate FLR requested!')
+                        logger.info('Initiate FLR requested!')
+                        self.config = self.config_type(self.pcie_regs, self.nvme_regs)
+                        break
 
         # Then check all other registers
         #  Nothing here yet!
@@ -269,7 +401,7 @@ class GenericNVMeNVSim(NVSimInterface):
     def check_mem_access(mem):
         ''' Tries to access mem. If this is not successful, then you will see a segfault
         '''
-        logger.info('Trying to access 0x{:x} size: {}'.format(mem.vaddr, mem.size))
+        logger.debug('Trying to access 0x{:x} size: {}'.format(mem.vaddr, mem.size))
 
         data = (ctypes.c_uint8 * (mem.size)).from_address(mem.vaddr)
         data[0] = 0xFF
@@ -281,7 +413,7 @@ class GenericNVMeNVSim(NVSimInterface):
         self.nvme_regs.CSTS.RDY = 0
 
     def enable(self):
-        logger.info('CC.EN 0 -> 1')
+        logger.debug('CC.EN 0 -> 1')
 
         # Log Admin queues addresses and sizes
         logger.debug(f'ASQS   {self.nvme_regs.AQA.ASQS}')
@@ -303,7 +435,7 @@ class GenericNVMeNVSim(NVSimInterface):
         self.check_mem_access(acq_mem)
 
         # Add ADMIN queue to queue_mgr
-        self.queue_mgr.add(
+        self.config.queue_mgr.add(
             NVMeSubmissionQueue(
                 asq_mem,
                 self.nvme_regs.AQA.ASQS + 1,
@@ -319,74 +451,39 @@ class GenericNVMeNVSim(NVSimInterface):
 
         # Ok, looks like the addresses add up, setting ourselves to ready!
         self.nvme_regs.CSTS.RDY = 1
-        logger.info('GenericNVMeNVSimDevice ready (CSTS.RDY = 1)!')
+        logger.debug('GenericNVMeNVSimDevice ready (CSTS.RDY = 1)!')
 
 
     def check_commands(self):
-        # Find all the queues we should look at for commands
-        busy_sqs = [(sq, cq) for k, (sq, cq) in
-                    self.queue_mgr.nvme_queues.items() if
-                    sq is not None and sq.num_entries() > 0]
 
-        # Go through all of them round robin style
-        # TODO: Change this around so we drain the ADMIN queue first
+        # First get all admin commands and handle them (ASQ has highest priority)
+        asq, acq = self.config.queue_mgr.get(0, 0)
+        if asq is not None and acq is not None:
+            for i in range(asq.num_entries()):
+                command = asq.get_command()
+                self.config.admin_cmd_handlers[command.OPC](self, command, asq, acq)
+
+        # Find all the IO queues we should look at for commands
+        busy_sqs = [(sq, cq) for k, (sq, cq) in
+                    self.config.queue_mgr.nvme_queues.items() if
+                    sq is not None and sq.num_entries() > 0 and sq.qid != 0]
+
         for sq, cq in busy_sqs:
             for sq_index in range(sq.num_entries()):
-
-                # No point in starting a new command if the cq for it is full
-                #  This may end up asserting in a legitimate case, but if that happens
-                #  we should take a look to see if we can avoid it
-                assert cq.is_full() is False, (
-                    'CQ id: {} is full, asserting to debug'.format(cq.qid))
-
-                # Get the command
                 command = sq.get_command()
-
-                # Handle the command
-                if sq.qid == 0:
-                    self.admin_cmd_handlers[command.OPC](self, command, sq, cq)
-                else:
-                    self.nvm_cmd_handlers[command.OPC](self, command, sq, cq)
+                self.config.nvm_cmd_handlers[command.OPC](self, command, sq, cq)
 
 
 class GenericNVMeNVSimDevice(NVMeDeviceCommon):
-    def __init__(self, pcie_regs, nvme_regs):
+    def __init__(self):
+        self.sim_thread = GenericNVMeNVSim()
+        self.sim_thread.start()
+
+        self.mps = 2 ** (12 + self.sim_thread.nvme_regs.CC.MPS)
         mem_mgr = SimMemMgr(4096)
-        super().__init__('GenericNVMeNVSimDevice',
-                         pcie_regs,
-                         nvme_regs,
+        super().__init__('nvsim',
+                         self.sim_thread.pcie_regs,
+                         self.sim_thread.nvme_regs,
                          mem_mgr)
-
-
-if __name__ == '__main__':
-
-    from lone.nvme.spec.commands.admin.identify import IdentifyController
-
-    # This changes and reacts to register/memory changes as a device
-    n = GenericNVMeNVSim()
-    n.start()
-
-    # This changes and reacts to register/memory changes as a host
-    d = GenericNVMeNVSimDevice(n.pcie_regs, n.nvme_regs)
-
-    for i in range(10):
-        if n.thread.is_alive() is False:
-            print('thread dead')
-            break
-        import time
-        if i == 1:
-            d.init_admin_queues(16, 16)
-            d.cc_enable()
-        if i == 2:
-            id_cmd = IdentifyController()
-            d.alloc(id_cmd)
-            d.sync_cmd(id_cmd)
-            print(id_cmd.data_in.SN, id_cmd.data_in.MN)
-        if i == 3:
-            d.initiate_flr()
-        if i == 9:
-            d.cc_disable()
-        print('tick')
-        time.sleep(1)
-        #d.nvme_regs.SQNDBS[0].SQTAIL += 1
-
+    def sim_stop(self):
+        self.sim_thread.stop()

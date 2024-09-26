@@ -132,8 +132,7 @@ def cleanup(nvme_device):
 
     # Nvsim specific cleanup
     elif nvme_device.pci_slot == 'nvsim':
-        nvme_device.sim_thread.stop()
-        nvme_device.sim_thread.join()
+        nvme_device.sim_stop()
 
     else:
         pytest.fail('invalid device type')

@@ -520,8 +520,8 @@ def NVMeDevice(pci_slot):
         as a real device in the pci bus
     '''
     if pci_slot == 'nvsim':
-        from nvsim import NVMeSimulatorGenericNVM
-        return NVMeSimulatorGenericNVM()
+        from nvsim_2.simulators.generic import GenericNVMeNVSimDevice
+        return GenericNVMeNVSimDevice()
     else:
         return NVMeDevicePhysical(pci_slot)
 
@@ -538,7 +538,7 @@ class NVMeDevicePhysical(NVMeDeviceCommon):
         # Create a pci_userspace_device, then get pcie and nvme regs
         device_found = False
         try:
-            pci_userspace_device = System.PciUserspaceDevice(pci_slot)
+            self.pci_userspace_device = System.PciUserspaceDevice(pci_slot)
             device_found = True
         except Exception as e:
             e
@@ -547,24 +547,22 @@ class NVMeDevicePhysical(NVMeDeviceCommon):
         if not device_found:
             raise NVMeDevicePhysicalNotFoundError(f'Not able to access {pci_slot}')
 
-        pci_regs = pci_userspace_device.pci_regs()
+        pci_regs = self.pci_userspace_device.pci_regs()
         pci_regs.init_capabilities()
 
-        nvme_regs = pci_userspace_device.nvme_regs()
-
-        # Figure out our MPS to use with the memory manager
-        self.mps = 2 ** (12 + nvme_regs.CC.MPS)
+        nvme_regs = self.pci_userspace_device.nvme_regs()
 
         # Memory manager
+        self.mps = 2 ** (12 + nvme_regs.CC.MPS)
         mem_mgr = System.DevMemMgr(self.mps,
-                                   pci_userspace_device.map_dma_region_read,
-                                   pci_userspace_device.map_dma_region_write,
-                                   pci_userspace_device.unmap_dma_region,
-                                   pci_userspace_device.iova_ranges)
+                                   self.pci_userspace_device.map_dma_region_read,
+                                   self.pci_userspace_device.map_dma_region_write,
+                                   self.pci_userspace_device.unmap_dma_region,
+                                   self.pci_userspace_device.iova_ranges)
 
         # Initialize NVMeDeviceCommon
         super().__init__(pci_slot,
-                         pci_userspace_device,
+                         self.pci_userspace_device,
                          pci_regs,
                          nvme_regs,
                          mem_mgr)

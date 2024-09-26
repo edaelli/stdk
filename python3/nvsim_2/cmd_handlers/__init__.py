@@ -13,7 +13,7 @@ class NVSimCmdHandlerInterface(metaclass=abc.ABCMeta):
 
     @staticmethod
     @abc.abstractmethod
-    def __call__(nvsim, command, sq, cq, cmd_spec_value=0):
+    def __call__(nvsim, command, sq, cq):
         raise NotImplementedError('not implemented')
 
     @staticmethod
@@ -25,7 +25,7 @@ class NVSimCmdHandlerInterface(metaclass=abc.ABCMeta):
         cqe.SF.SC = int(status_code)
         cqe.SQID = sq.qid
         cqe.SQHD = sq.head.value
-        cqe.CMD_SPEC = 0
+        cqe.CMD_SPEC = cmd_spec_value
         cq.post_completion(cqe)
 
 

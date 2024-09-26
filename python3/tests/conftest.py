@@ -44,7 +44,7 @@ def mocked_nvme_device(mocker):
         def allocated_mem_list(self):
             return self._allocated_mem_list
 
-    nvme_device = NVMeDeviceCommon('test_slot', None,
+    nvme_device = NVMeDeviceCommon('test_slot',
                                    pcie_regs, nvme_regs,
                                    MockedMemMgr(4096), 64, 16)
 
