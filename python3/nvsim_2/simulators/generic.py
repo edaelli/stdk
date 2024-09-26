@@ -1,13 +1,14 @@
 import ctypes
 import traceback
 
+from nvsim_2.simulators import NVSimInterface
 from lone.nvme.device import NVMeDeviceCommon
-from nvsim_2.simulators import NVSimInterface, NVSimCommandNotSupported
+from nvsim_2.cmd_handlers import NVSimCommandNotSupported
+from lone.nvme.spec.registers.pcie_regs import PCIeRegistersDirect
+from lone.nvme.spec.registers.nvme_regs import NVMeRegistersDirect
 from nvsim_2.simulators.nvsim_thread import NVSimThread
 from nvsim_2.reg_handlers.pcie import PCIeRegChangeHandler
 from nvsim_2.reg_handlers.nvme import NVMeRegChangeHandler
-from lone.nvme.spec.registers.pcie_regs import PCIeRegistersDirect
-from lone.nvme.spec.registers.nvme_regs import NVMeRegistersDirect
 from nvsim_2.memory import SimMemMgr
 from lone.nvme.spec.queues import QueueMgr, NVMeSubmissionQueue, NVMeCompletionQueue
 from lone.system import MemoryLocation
@@ -16,6 +17,7 @@ from lone.nvme.spec.commands.admin.identify import (IdentifyNamespaceData,
                                                     IdentifyNamespaceListData,
                                                     IdentifyUUIDListData)
 from lone.nvme.spec.structures import Generic
+from nvsim_2.cmd_handlers.admin import NVSimIdentify
 
 from lone.util.logging import log_init
 logger = log_init()
@@ -140,6 +142,7 @@ class GenericNVMeNVSimConfig:
         # Override the ones this simulator supports
 
         # Return list of handlers, OPC for index
+        handlers[NVSimIdentify.OPC] = NVSimIdentify()
         return handlers
 
     @staticmethod
@@ -163,6 +166,9 @@ class GenericNVMeNVSim(NVSimInterface):
 
         # Create the object to access NVMe registers
         self.nvme_regs = NVMeRegistersDirect()
+
+        # Set our MPS
+        self.mps = 4096
 
         # Initialize internal states for the simulated device
         self.initialize_internal_state()
@@ -375,6 +381,7 @@ if __name__ == '__main__':
             id_cmd = IdentifyController()
             d.alloc(id_cmd)
             d.sync_cmd(id_cmd)
+            print(id_cmd.data_in.SN, id_cmd.data_in.MN)
         if i == 3:
             d.initiate_flr()
         if i == 9:
