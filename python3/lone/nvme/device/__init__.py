@@ -133,6 +133,9 @@ class NVMeDeviceCommon:
         while True:
             if (time.time() - start_time) > timeout_s:
                 assert False, 'Device did not enable in {}s'.format(timeout_s)
+            elif self.nvme_regs.CSTS.CFS == 1:
+                assert False, 'Enabling while CFS=1, not watiting for RDY=1'
+                break
             elif self.nvme_regs.CSTS.RDY == 1:
                 break
             time.sleep(0)
@@ -321,6 +324,10 @@ class NVMeDeviceCommon:
             if time.time() > max_time:
                 break
 
+            if self.nvme_regs.CSTS.CFS == 1:
+                logger.error('CFS = 1 while looking for completions!')
+                break
+
             # Yield in case other threads are running
             time.sleep(0)
 
@@ -380,6 +387,10 @@ class NVMeDeviceCommon:
                 break
 
             if time.time() > max_time:
+                break
+
+            if self.nvme_regs.CSTS.CFS == 1:
+                logger.error('CFS = 1 while looking for completions!')
                 break
 
         return num_completions
@@ -503,16 +514,6 @@ class NVMeDeviceCommon:
             # Copy data out to it
             prp.set_data_buffer(bytes(command.data_out))
 
-    def __del__(self):
-        # Disable when no more references to this exist. This helps in cases where
-        #   we see an exception but the drive is still reading/writing to/from pci memory.
-        #   Disabling here hopefully tells the drive it is not allowed to use pci memory anymore
-        try:
-            self.cc_disable()
-        except Exception:
-            # Best effort, if something goes wrong, just ignore it!
-            pass
-
 
 def NVMeDevice(pci_slot):
     ''' Helper function to allow tests/modules/etc to pick a physical or simulated
@@ -520,7 +521,7 @@ def NVMeDevice(pci_slot):
         as a real device in the pci bus
     '''
     if pci_slot == 'nvsim':
-        from nvsim_2.simulators.generic import GenericNVMeNVSimDevice
+        from nvsim.simulators.generic import GenericNVMeNVSimDevice
         return GenericNVMeNVSimDevice()
     else:
         return NVMeDevicePhysical(pci_slot)

@@ -1,34 +1,36 @@
+import abc
+
 from lone.nvme.spec.structures import CQE
-from lone.nvme.spec.structures import Generic
+from lone.nvme.spec.commands.status_codes import status_codes
 
-import logging
-logger = logging.getLogger('nvsim_cmd_h')
-
-
-class NvsimCommandHandlers:
-    def __init__(self):
-        self.handlers = {}
-
-    def register(self, handler):
-        assert handler.OPC not in self.handlers, (
-            'OPC: 0x{:x} already in the list of handlers!'.format(handler.OPC))
-        self.handlers[handler.OPC] = handler()
-        handler.complete = NvsimCommandHandler.complete
+from lone.util.logging import log_init
+logger = log_init()
 
 
-class NvsimCommandHandler:
+class NVSimCmdHandlerInterface(metaclass=abc.ABCMeta):
 
-    def complete(self, command, sq, cq, status_code, cmd_spec=0):
-        # Complete the command
+    @staticmethod
+    @abc.abstractmethod
+    def __call__(nvsim, command, sq, cq):
+        raise NotImplementedError('not implemented')
+
+    @staticmethod
+    def complete(cid, sq, cq, status_code, cmd_spec_value=0):
+
+        # Create completion queue entry, fill it in, and post it
         cqe = CQE()
-        cqe.CID = command.CID
-        if status_code.cmd_type != Generic:
-            cqe.SF.SCT = 1
+        cqe.CID = cid
         cqe.SF.SC = int(status_code)
         cqe.SQID = sq.qid
         cqe.SQHD = sq.head.value
-        cqe.CMD_SPEC = cmd_spec
+        cqe.CMD_SPEC = cmd_spec_value
         cq.post_completion(cqe)
 
-        if status_code.failure:
-            logger.info('Command OPC 0x{:x} resulted in "{}"'.format(command.OPC, status_code))
+
+class NVSimCommandNotSupported(NVSimCmdHandlerInterface):
+
+    @staticmethod
+    def __call__(nvsim, command, sq, cq, cmd_spec_value=0):
+        logger.error(f'Command OPC 0x{command.OPC:x} not supported')
+        status_code = status_codes['Invalid Field in Command']
+        NVSimCmdHandlerInterface.complete(command.CID, sq, cq, status_code, cmd_spec_value)

@@ -1,6 +1,5 @@
 import time
 import threading
-import traceback
 
 import logging
 logger = logging.getLogger('nvsim_thread')
@@ -18,7 +17,7 @@ class NVSimThread(threading.Thread):
             self.nvme_handler = nvme_device.nvsim_nvme_handler
             self.exception_handler = nvme_device.nvsim_exception_handler
         except AttributeError:
-            raise Exception('nvme device must implement the NVMeSimulator interface')
+            raise Exception('NVMe simulated device must implement the NVMeSimulator interface')
 
     def stop(self):
         self.stop_event.set()
@@ -32,6 +31,8 @@ class NVSimThread(threading.Thread):
                 with self.lock:
                     self.pcie_handler()
 
+                # Check for changes to nvme registers and act on them, make sure to
+                #  lock so register objects are not able to move under the checking
                 with self.lock:
                     self.nvme_handler()
 
@@ -48,8 +49,4 @@ class NVSimThread(threading.Thread):
                 break
 
             # Briefly yield so other tasks can run
-            time.sleep(1 / 1000000)
-
-        del self.pcie_handler
-        del self.nvme_handler
-        del self.exception_handler
+            time.sleep(0)

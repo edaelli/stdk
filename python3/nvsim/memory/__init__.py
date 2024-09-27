@@ -1,6 +1,5 @@
 import ctypes
 
-from types import SimpleNamespace
 from lone.system import DevMemMgr, MemoryLocation
 
 
@@ -12,9 +11,6 @@ class SimMemMgr(DevMemMgr):
         '''
         self.page_size = page_size
         self._allocated_mem_list = []
-
-        # TODO: Clean this up
-        self.iova_mgr = SimpleNamespace(reset=lambda: True)
 
     def malloc(self, size, direction, client=None):
         memory_obj = (ctypes.c_uint8 * size)()
@@ -34,12 +30,6 @@ class SimMemMgr(DevMemMgr):
         for page_idx in range(num_pages):
             pages.append(self.malloc(self.page_size))
         return pages
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_value, exc_traceback):
-        pass
 
     def free(self, memory):
         for m in self._allocated_mem_list:

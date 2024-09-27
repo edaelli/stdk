@@ -1,6 +1,6 @@
 import ctypes
 
-from nvsim.cmd_handlers import NvsimCommandHandlers
+from nvsim.cmd_handlers import NVSimCmdHandlerInterface
 
 from lone.nvme.spec.prp import PRP
 from lone.nvme.spec.commands.status_codes import status_codes
@@ -24,93 +24,96 @@ from lone.nvme.spec.commands.admin.get_set_feature import (GetFeature, SetFeatur
                                                            GetFeaturePowerManagement,
                                                            SetFeaturePowerManagement)
 
+from lone.util.logging import log_init
+logger = log_init()
 
-import logging
-logger = logging.getLogger('nvsim_admin')
 
-
-class NVSimIdentify:
+class NVSimIdentify(NVSimCmdHandlerInterface):
     OPC = Identify().OPC
 
-    def __call__(self, nvsim_state, command, sq, cq):
+    @staticmethod
+    def __call__(nvsim, command, sq, cq):
 
         # Cast the command into a identify command
         id_cmd = Identify.from_buffer(command)
-        logger.debug('NVMeAdminCommandHandler: {} CNS: 0x{:x}'.format(
-            self.__class__.__name__, id_cmd.CNS))
+        logger.debug(f'NVMeAdminCommandHandler: NVSimIdentify CNS: 0x{id_cmd.CNS:x}')
 
         # Create the PRP at the location from the command
-        prp = PRP(nvsim_state.mem_mgr, IdentifyData.size, nvsim_state.mps, None,
+        prp = PRP(None, IdentifyData.size, nvsim.config.mps, None,
                   'sim identify', alloc=False).from_address(id_cmd.DPTR.PRP.PRP1)
 
         # Based on CNS, we have to simulate different structures for responses
         if id_cmd.CNS == IdentifyController().CNS:
-            prp.set_data_buffer(bytearray(nvsim_state.identify_controller_data()))
+            prp.set_data_buffer(bytearray(nvsim.config.id_ctrl_data))
             status_code = status_codes['Successful Completion']
 
         elif id_cmd.CNS == IdentifyNamespace().CNS:
-            try:
-                prp.set_data_buffer(bytearray(nvsim_state.identify_namespace_data(id_cmd.NSID)))
-                status_code = status_codes['Successful Completion']
-            except IndexError:
+            if id_cmd.NSID == 0 or id_cmd.NSID > len(nvsim.config.namespaces) - 1:
                 status_code = status_codes['Invalid Namespace or Format']
+            else:
+                prp.set_data_buffer(bytearray(nvsim.config.id_ns_data[id_cmd.NSID]))
+                status_code = status_codes['Successful Completion']
 
         elif id_cmd.CNS == IdentifyNamespaceList().CNS:
-            prp.set_data_buffer(bytearray(nvsim_state.identify_namespace_list_data()))
+            prp.set_data_buffer(bytearray(nvsim.config.id_ns_list_data))
             status_code = status_codes['Successful Completion']
 
         elif id_cmd.CNS == IdentifyUUIDList().CNS:
-            prp.set_data_buffer(bytearray(nvsim_state.identify_uuid_list_data()))
+            prp.set_data_buffer(bytearray(nvsim.config.id_uuid_list_data))
             status_code = status_codes['Successful Completion']
 
         else:
             # Return invalid field in command in SF.SC
-            logger.info('Identify command with CNS: 0x{:x} not supported'.format(id_cmd.CNS))
+            logger.info(f'Identify command with CNS: 0x{id_cmd.CNS:x} not supported')
             status_code = status_codes['Invalid Field in Command']
 
         # Complete the command
-        self.complete(command, sq, cq, status_code)
+        NVSimCmdHandlerInterface.complete(command.CID, sq, cq, status_code)
 
 
-class NVSimCreateIOCompletionQueue:
+class NVSimCreateIOCompletionQueue(NVSimCmdHandlerInterface):
     OPC = CreateIOCompletionQueue().OPC
 
-    def __call__(self, nvsim_state, command, sq, cq):
+    @staticmethod
+    def __call__(nvsim, command, sq, cq):
 
         # Cast the command into a CreateIOCompletionQueue comma1d
         ccq_cmd = CreateIOCompletionQueue.from_buffer(command)
 
         if ccq_cmd.PC != 1:
-            self.complete(command, sq, cq, status_codes['Invalid Field in Command'])
+            NVSimCmdHandlerInterface.complete(
+                command.CID, sq, cq, status_codes['Invalid Field in Command'])
             return
 
         # Create the memory object for the queue location
         q_mem = MemoryLocation(ccq_cmd.DPTR.PRP.PRP1,
                                ccq_cmd.DPTR.PRP.PRP1,
-                               (ccq_cmd.QSIZE + 1) * nvsim_state.nvme_device.cq_entry_size,
+                               (ccq_cmd.QSIZE + 1) * 16,
                                'nvsim_iocq')
 
         # Make sure we can access the queue memory before actually doing it
-        nvsim_state.check_mem_access(q_mem)
+        nvsim.check_mem_access(q_mem)
 
-        # Add IO queue to nvsim_state's queue mgr
+        # Add IO queue to nvsim's queue mgr
         new_cq = NVMeCompletionQueue(q_mem,
                                      ccq_cmd.QSIZE + 1,
-                                     nvsim_state.nvme_device.cq_entry_size,
+                                     16,
                                      ccq_cmd.QID,
                                      (ctypes.addressof(
-                                         nvsim_state.nvme_regs.SQNDBS[0]) +
+                                         nvsim.nvme_regs.SQNDBS[0]) +
                                          ((ccq_cmd.QID * 8) + 4)))
 
         # Keep it in our state tracker until it can be used with a SQ
-        nvsim_state.completion_queues.append(new_cq)
-        self.complete(command, sq, cq, status_codes['Successful Completion'])
+        nvsim.config.completion_queues.append(new_cq)
+        NVSimCmdHandlerInterface.complete(
+            command.CID, sq, cq, status_codes['Successful Completion'])
 
 
-class NVSimCreateIOSubmissionQueue:
+class NVSimCreateIOSubmissionQueue(NVSimCmdHandlerInterface):
     OPC = CreateIOSubmissionQueue().OPC
 
-    def __call__(self, nvsim_state, command, sq, cq):
+    @staticmethod
+    def __call__(nvsim, command, sq, cq):
 
         # Cast the command into a CreateIOCompletionQueue command
         csq_cmd = CreateIOSubmissionQueue.from_buffer(command)
@@ -118,35 +121,39 @@ class NVSimCreateIOSubmissionQueue:
         # Create the memory object for the queue location
         q_mem = MemoryLocation(csq_cmd.DPTR.PRP.PRP1,
                                csq_cmd.DPTR.PRP.PRP1,
-                               (csq_cmd.QSIZE + 1) * nvsim_state.nvme_device.sq_entry_size,
+                               (csq_cmd.QSIZE + 1) * 64,
                                'nvsim_iosq')
 
         # Make sure we can access the queue memory before actually doing it
-        nvsim_state.check_mem_access(q_mem)
+        nvsim.check_mem_access(q_mem)
 
         # Create the sq object
         new_sq = NVMeSubmissionQueue(q_mem,
                                      csq_cmd.QSIZE + 1,
-                                     nvsim_state.nvme_device.sq_entry_size,
+                                     64,
                                      csq_cmd.QID,
                                      (ctypes.addressof(
-                                         nvsim_state.nvme_regs.SQNDBS[0]) +
+                                         nvsim.nvme_regs.SQNDBS[0]) +
                                          ((csq_cmd.QID * 8))))
         # Find the associated CQ
-        cqs = [c for c in nvsim_state.completion_queues if c.qid == csq_cmd.CQID]
+        cqs = [c for c in nvsim.config.completion_queues if c.qid == csq_cmd.CQID]
         if len(cqs) == 0:
-            self.complete(command, sq, cq, status_codes['Invalid Field in Command'])
+            NVSimCmdHandlerInterface.complete(
+                command.CID, sq, cq, status_codes['Invalid Field in Command'])
             return
 
         # Add it to the list
-        nvsim_state.queue_mgr.add(new_sq, cqs[0])
-        self.complete(command, sq, cq, status_codes['Successful Completion'])
+        nvsim.config.queue_mgr.add(new_sq, cqs[0])
+        NVSimCmdHandlerInterface.complete(
+            command.CID, sq, cq, status_codes['Successful Completion'])
 
 
-class NVSimDeleteIOCompletionQueue:
+class NVSimDeleteIOCompletionQueue(NVSimCmdHandlerInterface):
     OPC = DeleteIOCompletionQueue().OPC
 
-    def __call__(self, nvsim_state, command, sq, cq):
+    @staticmethod
+    def __call__(nvsim, command, sq, cq):
+
         del_iocq_cmd = DeleteIOCompletionQueue.from_buffer(command)
         del_cqid = del_iocq_cmd.QID
 
@@ -154,15 +161,18 @@ class NVSimDeleteIOCompletionQueue:
         assert del_cqid != 0, "DeleteIOCompletionQueue command for qid = 0!"
 
         # Delete internal queue
-        nvsim_state.queue_mgr.remove_cq(del_cqid)
+        nvsim.config.queue_mgr.remove_cq(del_cqid)
 
-        self.complete(command, sq, cq, status_codes['Successful Completion'])
+        NVSimCmdHandlerInterface.complete(
+            command.CID, sq, cq, status_codes['Successful Completion'])
 
 
-class NVSimDeleteIOSubmissionQueue:
+class NVSimDeleteIOSubmissionQueue(NVSimCmdHandlerInterface):
     OPC = DeleteIOSubmissionQueue().OPC
 
-    def __call__(self, nvsim_state, command, sq, cq):
+    @staticmethod
+    def __call__(nvsim, command, sq, cq):
+
         del_iosq_cmd = DeleteIOSubmissionQueue.from_buffer(command)
         del_sqid = del_iosq_cmd.QID
 
@@ -170,15 +180,17 @@ class NVSimDeleteIOSubmissionQueue:
         assert del_sqid != 0, "DeleteIOSubmissionQueue command for qid = 0!"
 
         # Delete internal queue
-        nvsim_state.queue_mgr.remove_sq(del_sqid)
+        nvsim.config.queue_mgr.remove_sq(del_sqid)
 
-        self.complete(command, sq, cq, status_codes['Successful Completion'])
+        NVSimCmdHandlerInterface.complete(
+            command.CID, sq, cq, status_codes['Successful Completion'])
 
 
-class NVSimGetLogPage:
+class NVSimGetLogPage(NVSimCmdHandlerInterface):
     OPC = GetLogPage().OPC
 
-    def __call__(self, nvsim_state, command, sq, cq):
+    @staticmethod
+    def __call__(nvsim, command, sq, cq):
         glp_cmd = GetLogPage.from_buffer(command)
 
         # Whick log id are we servicing?
@@ -207,37 +219,43 @@ class NVSimGetLogPage:
             else:
                 # Offset in structure index
                 logger.error('OT = 1 not yet implemented!')
-                return self.complete(command, sq, cq, status_codes['Invalid Field in Command'])
+                return NVSimCmdHandlerInterface.complete(
+                    command.CID, sq, cq, status_codes['Invalid Field in Command'])
 
             # Copy data to the host's PRP
-            prp = PRP(None, num_bytes, nvsim_state.mps, None,
+            prp = PRP(None, num_bytes, nvsim.mps, None,
                       'sim glp', alloc=False).from_address(glp_cmd.DPTR.PRP.PRP1,
                                                            glp_cmd.DPTR.PRP.PRP2)
             prp.set_data_buffer(data_out)
 
             # Complete command
-            self.complete(command, sq, cq, status_codes['Successful Completion'])
+            NVSimCmdHandlerInterface.complete(
+                command.CID, sq, cq, status_codes['Successful Completion'])
 
         else:
-            self.complete(command, sq, cq, status_codes['Invalid Log Page', GetLogPage])
+            NVSimCmdHandlerInterface.complete(
+                command.CID, sq, cq, status_codes['Invalid Log Page', GetLogPage])
 
 
-class NVSimFormat:
+class NVSimFormat(NVSimCmdHandlerInterface):
     OPC = FormatNVM().OPC
 
-    def __call__(self, nvsim_state, command, sq, cq):
+    @staticmethod
+    def __call__(nvsim, command, sq, cq):
         fmt_cmd = FormatNVM.from_buffer(command)
 
         # Re-initialize our backend storage
-        nvsim_state.namespaces[fmt_cmd.NSID].init_storage()
+        nvsim.namespaces[fmt_cmd.NSID].init_storage()
 
-        self.complete(command, sq, cq, status_codes['Successful Completion'])
+        NVSimCmdHandlerInterface.complete(
+            command.CID, sq, cq, status_codes['Successful Completion'])
 
 
-class NVSimGetFeature:
+class NVSimGetFeature(NVSimCmdHandlerInterface):
     OPC = GetFeature().OPC
 
-    def __call__(self, nvsim_state, command, sq, cq):
+    @staticmethod
+    def __call__(nvsim, command, sq, cq):
         gf_cmd = GetFeature.from_buffer(command)
         cmd_spec = 0
 
@@ -247,7 +265,7 @@ class NVSimGetFeature:
 
             # Pretend PS = 1 until we implement state
             response = FeaturePowerManagement()
-            response.PS = nvsim_state.power_state
+            response.PS = nvsim.config.power_state
 
             # Get response and status code
             cmd_spec = (ctypes.c_uint32).from_buffer(response)
@@ -256,36 +274,21 @@ class NVSimGetFeature:
             assert f'FID: 0x{gf_cmd.FID:x} not supported!'
 
         # Respond to the command
-        self.complete(command, sq, cq, status_code, cmd_spec)
+        NVSimCmdHandlerInterface.complete(command.CID, sq, cq, status_code, cmd_spec)
 
 
-class NVSimSetFeature:
+class NVSimSetFeature(NVSimCmdHandlerInterface):
     OPC = SetFeature().OPC
 
-    def __call__(self, nvsim_state, command, sq, cq):
+    @staticmethod
+    def __call__(nvsim, command, sq, cq):
         sf_cmd = SetFeature.from_buffer(command)
 
         if sf_cmd.FID == SetFeaturePowerManagement().FID:
             sf_cmd = SetFeaturePowerManagement.from_buffer(command)
-            nvsim_state.power_state = sf_cmd.PS
+            nvsim.config.power_state = sf_cmd.PS
             assert sf_cmd.SV == 0, 'SV set not yet supported'
             status_code = status_codes['Successful Completion']
 
         # Respond to the command
-        self.complete(command, sq, cq, status_code)
-
-
-# Create our admin command handlers object. Can you do this with introspection??
-admin_handlers = NvsimCommandHandlers()
-for handler in [
-    NVSimIdentify,
-    NVSimCreateIOCompletionQueue,
-    NVSimDeleteIOCompletionQueue,
-    NVSimCreateIOSubmissionQueue,
-    NVSimDeleteIOSubmissionQueue,
-    NVSimGetLogPage,
-    NVSimFormat,
-    NVSimGetFeature,
-    NVSimSetFeature,
-]:
-    admin_handlers.register(handler)
+        NVSimCmdHandlerInterface.complete(command.CID, sq, cq, status_code)

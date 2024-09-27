@@ -1,40 +1,38 @@
 import ctypes
-import traceback
 import mmap
 
-from nvsim_2.simulators import NVSimInterface
+from nvsim.simulators import NVSimInterface
 from lone.nvme.device import NVMeDeviceCommon
-from nvsim_2.cmd_handlers import NVSimCommandNotSupported
+from nvsim.cmd_handlers import NVSimCommandNotSupported
 from lone.nvme.spec.registers.pcie_regs import PCIeRegistersDirect
 from lone.nvme.spec.registers.nvme_regs import NVMeRegistersDirect
-from nvsim_2.simulators.nvsim_thread import NVSimThread
-from nvsim_2.reg_handlers.pcie import PCIeRegChangeHandler
-from nvsim_2.reg_handlers.nvme import NVMeRegChangeHandler
-from nvsim_2.memory import SimMemMgr
+from nvsim.simulators.nvsim_thread import NVSimThread
+from nvsim.reg_handlers.pcie import PCIeRegChangeHandler
+from nvsim.reg_handlers.nvme import NVMeRegChangeHandler
+from nvsim.memory import SimMemMgr
 from lone.nvme.spec.queues import QueueMgr, NVMeSubmissionQueue, NVMeCompletionQueue
 from lone.system import MemoryLocation
 from lone.nvme.spec.commands.admin.identify import (IdentifyNamespaceData,
                                                     IdentifyControllerData,
                                                     IdentifyNamespaceListData,
                                                     IdentifyUUIDListData)
-from lone.nvme.spec.structures import Generic
-from nvsim_2.cmd_handlers.admin import (NVSimIdentify,
-                                        NVSimCreateIOCompletionQueue,
-                                        NVSimCreateIOSubmissionQueue,
-                                        NVSimDeleteIOCompletionQueue,
-                                        NVSimDeleteIOSubmissionQueue,
-                                        NVSimGetLogPage,
-                                        NVSimFormat,
-                                        NVSimGetFeature,
-                                        NVSimSetFeature)
+from nvsim.cmd_handlers.admin import (NVSimIdentify,
+                                      NVSimCreateIOCompletionQueue,
+                                      NVSimCreateIOSubmissionQueue,
+                                      NVSimDeleteIOCompletionQueue,
+                                      NVSimDeleteIOSubmissionQueue,
+                                      NVSimGetLogPage,
+                                      NVSimFormat,
+                                      NVSimGetFeature,
+                                      NVSimSetFeature)
 
-from nvsim_2.cmd_handlers.nvm import (NVSimWrite,
-                                      NVSimRead,
-                                      NVSimFlush)
+from nvsim.cmd_handlers.nvm import (NVSimWrite,
+                                    NVSimRead,
+                                    NVSimFlush)
 
-import logging
 from lone.util.logging import log_init
-logger = log_init(level=logging.DEBUG)
+logger = log_init()
+
 
 class GenericNVMeNVSimNamespace:
 
@@ -221,7 +219,7 @@ class GenericNVMeNVSimConfig:
 
         # Initialize our namespaces
         self.namespaces = [
-            None, # Namespace 0 is never valid
+            None,  # Namespace 0 is never valid
             GenericNVMeNVSimNamespace(512, 4096, '/tmp/ns1.dat'),
             GenericNVMeNVSimNamespace(960, 4096, '/tmp/ns2.dat'),
         ]
@@ -355,8 +353,8 @@ class GenericNVMeNVSim(NVSimInterface):
         self.nvme_handler()
 
     def nvsim_exception_handler(self, exception):
-        print('Simulator thread raised the following exception exited:')
-        print(traceback.format_exc())
+        logger.error('Simulator thread raised an exception and is no longer running!')
+        logger.exception(exception)
 
         # Set CFS on simulator exceptions so calling code can stop early
         self.nvme_regs.CSTS.CFS = 1
@@ -367,9 +365,9 @@ class GenericNVMeNVSim(NVSimInterface):
         # First check capabilitiers changed
         for old_cap, new_cap in zip(old_pcie_regs.capabilities, new_pcie_regs.capabilities):
             if old_cap != new_cap:
-                if type(new_cap) == new_pcie_regs.PCICapExpress:
+                if type(new_cap) is new_pcie_regs.PCICapExpress:
                     if old_cap.PXDC.IFLR == 0 and new_cap.PXDC.IFLR == 1:
-                        logger.info('Initiate FLR requested!')
+                        logger.debug('Initiate FLR requested!')
                         self.config = self.config_type(self.pcie_regs, self.nvme_regs)
                         break
 
@@ -390,10 +388,8 @@ class GenericNVMeNVSim(NVSimInterface):
             # Call nvsim_disable simulator interface
             self.disable()
 
-        # If we are ready and any of the doorbell sq tails are different
-        old_dbs = bytearray(old_nvme_regs.SQNDBS)
-        new_dbs = bytearray(new_nvme_regs.SQNDBS)
-        if new_nvme_regs.CSTS.RDY == 1 and old_dbs != new_dbs:
+        # If we are ready go check for commands
+        if new_nvme_regs.CSTS.RDY == 1:
             # Check for commands
             self.check_commands()
 
@@ -453,25 +449,31 @@ class GenericNVMeNVSim(NVSimInterface):
         self.nvme_regs.CSTS.RDY = 1
         logger.debug('GenericNVMeNVSimDevice ready (CSTS.RDY = 1)!')
 
-
     def check_commands(self):
 
         # First get all admin commands and handle them (ASQ has highest priority)
         asq, acq = self.config.queue_mgr.get(0, 0)
         if asq is not None and acq is not None:
-            for i in range(asq.num_entries()):
-                command = asq.get_command()
+            command = asq.get_command()
+            while command is not None:
                 self.config.admin_cmd_handlers[command.OPC](self, command, asq, acq)
+                command = asq.get_command()
 
         # Find all the IO queues we should look at for commands
         busy_sqs = [(sq, cq) for k, (sq, cq) in
                     self.config.queue_mgr.nvme_queues.items() if
                     sq is not None and sq.num_entries() > 0 and sq.qid != 0]
 
-        for sq, cq in busy_sqs:
-            for sq_index in range(sq.num_entries()):
+        # Max commands to handle per loop
+        cmds_in_qs = sum([sq.num_entries() for sq, cq in busy_sqs])
+        nvm_commands_handled = min(100, cmds_in_qs)
+
+        while nvm_commands_handled > 0:
+            for sq, cq in busy_sqs:
                 command = sq.get_command()
-                self.config.nvm_cmd_handlers[command.OPC](self, command, sq, cq)
+                if command is not None:
+                    self.config.nvm_cmd_handlers[command.OPC](self, command, sq, cq)
+                    nvm_commands_handled -= 1
 
 
 class GenericNVMeNVSimDevice(NVMeDeviceCommon):
@@ -485,5 +487,9 @@ class GenericNVMeNVSimDevice(NVMeDeviceCommon):
                          self.sim_thread.pcie_regs,
                          self.sim_thread.nvme_regs,
                          mem_mgr)
-    def sim_stop(self):
-        self.sim_thread.stop()
+
+    def __del__(self):
+        # Wait until the sim device is gc'd to stop the thread
+        #   so we know nobody is waiting on anything from it anymore
+        if self.sim_thread.thread.is_alive():
+            self.sim_thread.thread.stop()
