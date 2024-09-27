@@ -494,3 +494,9 @@ class GenericNVMeNVSimDevice(NVMeDeviceCommon):
 
         # Create simulated device
         super().__init__('nvsim', pcie_regs, nvme_regs, mem_mgr)
+
+    def __del__(self):
+        # Wait until the sim device is gc'd to stop the thread
+        #   so we know nobody is waiting on anything from it anymore
+        if self.sim_thread.thread.is_alive():
+            self.sim_thread.thread.stop()

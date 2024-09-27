@@ -479,6 +479,7 @@ def test_alloc(mocked_nvme_device, mocked_admin_cmd, mocked_nvm_cmd):
 ####################################################################################################
 def test_nvme_device(mocker):
     # Test that we get the right type of device when using nvsim and a real pcie device
+    mocker.patch('threading.Thread.start')
     assert type(NVMeDevice('nvsim')) is GenericNVMeNVSimDevice
 
     mocker.patch('lone.nvme.device.NVMeDevicePhysical.__init__', lambda x, y: None)
