@@ -10,6 +10,7 @@ class NVSimThread(threading.Thread):
         threading.Thread.__init__(self)
         self.stop_event = threading.Event()
         self.lock = threading.Lock()
+        self.daemon = True
 
         # Devices must implement the following interfaces
         try:
@@ -37,6 +38,8 @@ class NVSimThread(threading.Thread):
                     self.nvme_handler()
 
             except Exception as e:
+                # If the simulator code sees an exception while handling changes we
+                #   call the interface here and break out.
                 self.exception_handler(e)
                 break
 

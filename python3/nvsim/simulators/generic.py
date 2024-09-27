@@ -1,21 +1,21 @@
 import ctypes
 import mmap
 
-from nvsim.simulators import NVSimInterface
+from lone.system import MemoryLocation
 from lone.nvme.device import NVMeDeviceCommon
-from nvsim.cmd_handlers import NVSimCommandNotSupported
 from lone.nvme.spec.registers.pcie_regs import PCIeRegistersDirect
 from lone.nvme.spec.registers.nvme_regs import NVMeRegistersDirect
-from nvsim.simulators.nvsim_thread import NVSimThread
-from nvsim.reg_handlers.pcie import PCIeRegChangeHandler
-from nvsim.reg_handlers.nvme import NVMeRegChangeHandler
-from nvsim.memory import SimMemMgr
 from lone.nvme.spec.queues import QueueMgr, NVMeSubmissionQueue, NVMeCompletionQueue
-from lone.system import MemoryLocation
 from lone.nvme.spec.commands.admin.identify import (IdentifyNamespaceData,
                                                     IdentifyControllerData,
                                                     IdentifyNamespaceListData,
                                                     IdentifyUUIDListData)
+from nvsim.simulators import NVSimInterface
+from nvsim.simulators.nvsim_thread import NVSimThread
+from nvsim.reg_handlers.pcie import PCIeRegChangeHandler
+from nvsim.reg_handlers.nvme import NVMeRegChangeHandler
+from nvsim.memory import SimMemMgr
+from nvsim.cmd_handlers import NVSimCommandNotSupported
 from nvsim.cmd_handlers.admin import (NVSimIdentify,
                                       NVSimCreateIOCompletionQueue,
                                       NVSimCreateIOSubmissionQueue,
@@ -97,7 +97,6 @@ class GenericNVMeNVSimConfig:
         self.init_nvme_regs()
         self.init_identify_controller()
         self.init_namespaces()
-
         self.init_cmd_handlers()
 
         # Keep a QueueMgr object to track our internal queues
@@ -188,11 +187,12 @@ class GenericNVMeNVSimConfig:
         self.pcie_regs.ID.DID = 0xE771
 
     def init_nvme_regs(self):
-        self.mps = 4096  # TODO: set it in the regs as well
-
         self.nvme_regs.CAP.CSS = 0x40
         self.nvme_regs.VS.MJR = 0x02
         self.nvme_regs.VS.MNR = 0x01
+
+        self.nvme_regs.CC.MPS = 0
+        self.mps = 4096
 
     def init_identify_controller(self):
         self.id_ctrl_data = IdentifyControllerData()
@@ -201,8 +201,10 @@ class GenericNVMeNVSimConfig:
         self.id_ctrl_data.SN = b'EDDAE771'
         self.id_ctrl_data.FR = b'0.001'
 
-        # Power states
+        # Current power state, start with 0
         self.power_state = 0
+
+        # Power states supported
         self.id_ctrl_data.NPSS = 5
         self.id_ctrl_data.PSDS[0].MXPS = 0
         self.id_ctrl_data.PSDS[0].MP = 2500
@@ -285,9 +287,9 @@ class GenericNVMeNVSimConfig:
         self.id_uuid_list_data.UUIDS[15].UUID[0] = 16
 
     def init_cmd_handlers(self):
+
         # ADMIN Commands
         self.admin_cmd_handlers = [NVSimCommandNotSupported()] * 256
-
         for cmd in [NVSimIdentify(),
                     NVSimCreateIOCompletionQueue(),
                     NVSimCreateIOSubmissionQueue(),
@@ -329,7 +331,6 @@ class GenericNVMeNVSim(NVSimInterface):
 
         # Create our thread, but dont start it until requested
         self.thread = NVSimThread(self)
-        self.thread.daemon = True
 
         # Clear reset flag
         self.reset = False
@@ -481,15 +482,15 @@ class GenericNVMeNVSimDevice(NVMeDeviceCommon):
         self.sim_thread = GenericNVMeNVSim()
         self.sim_thread.start()
 
-        self.mps = 2 ** (12 + self.sim_thread.nvme_regs.CC.MPS)
-        mem_mgr = SimMemMgr(4096)
-        super().__init__('nvsim',
-                         self.sim_thread.pcie_regs,
-                         self.sim_thread.nvme_regs,
-                         mem_mgr)
+        # Get our registers from the simulator thread
+        pcie_regs = self.sim_thread.pcie_regs
+        nvme_regs = self.sim_thread.nvme_regs
 
-    def __del__(self):
-        # Wait until the sim device is gc'd to stop the thread
-        #   so we know nobody is waiting on anything from it anymore
-        if self.sim_thread.thread.is_alive():
-            self.sim_thread.thread.stop()
+        # Calculate MPS
+        self.mps = 2 ** (12 + nvme_regs.CC.MPS)
+
+        # Create memory manager
+        mem_mgr = SimMemMgr(self.mps)
+
+        # Create simulated device
+        super().__init__('nvsim', pcie_regs, nvme_regs, mem_mgr)

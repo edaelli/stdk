@@ -1,10 +1,9 @@
 import ctypes
 
 from nvsim.cmd_handlers import NVSimCmdHandlerInterface
-
+from lone.system import MemoryLocation
 from lone.nvme.spec.prp import PRP
 from lone.nvme.spec.commands.status_codes import status_codes
-from lone.system import MemoryLocation
 from lone.nvme.spec.queues import NVMeSubmissionQueue, NVMeCompletionQueue
 
 from lone.nvme.spec.commands.admin.identify import (Identify,
@@ -263,7 +262,7 @@ class NVSimGetFeature(NVSimCmdHandlerInterface):
         if gf_cmd.FID == GetFeaturePowerManagement().FID:
             gf_cmd = GetFeaturePowerManagement.from_buffer(command)
 
-            # Pretend PS = 1 until we implement state
+            # Add our current power state to the response
             response = FeaturePowerManagement()
             response.PS = nvsim.config.power_state
 
@@ -287,7 +286,10 @@ class NVSimSetFeature(NVSimCmdHandlerInterface):
         if sf_cmd.FID == SetFeaturePowerManagement().FID:
             sf_cmd = SetFeaturePowerManagement.from_buffer(command)
             nvsim.config.power_state = sf_cmd.PS
+
+            # TODO Implement saving restoring stuff to/from a file
             assert sf_cmd.SV == 0, 'SV set not yet supported'
+
             status_code = status_codes['Successful Completion']
 
         # Respond to the command

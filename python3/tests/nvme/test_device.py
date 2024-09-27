@@ -69,14 +69,14 @@ def test_cc_disable(mocker, mocked_nvme_device):
     ''' def cc_disable(self, timeout_s=10):
     '''
     # Mock time.sleep for these tests
-    mocker.patch('time.sleep', None)
+    mocker.patch('time.sleep', lambda x: None)
 
     # Timeout path, includes more than one loop
     mocked_nvme_device.nvme_regs.CSTS.RDY = 1
     with pytest.raises(Exception):
         mocked_nvme_device.cc_disable(timeout_s=0)
     with pytest.raises(Exception):
-        mocked_nvme_device.cc_disable(timeout_s=1)
+        mocked_nvme_device.cc_disable(timeout_s=0.001)
     assert mocked_nvme_device.nvme_regs.CSTS.RDY == 1
     assert mocked_nvme_device.nvme_regs.CC.EN == 0
 
@@ -104,7 +104,7 @@ def test_cc_enable(mocker, mocked_nvme_device):
     ''' def cc_enable(self, timeout_s=10):
     '''
     # Mock time.sleep for these tests
-    mocker.patch('time.sleep', None)
+    mocker.patch('time.sleep', lambda x: None)
     mocked_nvme_device.nvme_regs.CC.EN = 0
 
     # Timeout path, includes more than one loop
@@ -115,13 +115,13 @@ def test_cc_enable(mocker, mocked_nvme_device):
 
     mocked_nvme_device.nvme_regs.CSTS.RDY = 0
     with pytest.raises(Exception):
-        mocked_nvme_device.cc_enable(timeout_s=1)
+        mocked_nvme_device.cc_enable(timeout_s=0.1)
     assert mocked_nvme_device.nvme_regs.CC.EN == 1
 
     mocked_nvme_device.nvme_regs.CSTS.RDY = 0
     mocked_nvme_device.nvme_regs.CSTS.CFS = 1
     with pytest.raises(Exception):
-        mocked_nvme_device.cc_enable(timeout_s=1)
+        mocked_nvme_device.cc_enable(timeout_s=0.1)
     assert mocked_nvme_device.nvme_regs.CC.EN == 1
     mocked_nvme_device.nvme_regs.CSTS.CFS = 0
 

@@ -563,7 +563,6 @@ class NVMeDevicePhysical(NVMeDeviceCommon):
 
         # Initialize NVMeDeviceCommon
         super().__init__(pci_slot,
-                         self.pci_userspace_device,
                          pci_regs,
                          nvme_regs,
                          mem_mgr)

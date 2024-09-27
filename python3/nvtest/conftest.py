@@ -118,6 +118,20 @@ def lone_config(pytestconfig):
     return config
 
 
+def cleanup(nvme_device):
+
+    # Disabling then free all memory used by a test
+    nvme_device.nvme_regs.CC.EN = 0
+    nvme_device.mem_mgr.free_all()
+
+    # Remove references to nvme_regs before we try to clean the device
+    del nvme_device.nvme_regs
+
+    # Real device specific cleanup
+    if hasattr(nvme_device, 'pci_userspace_device'):
+        nvme_device.pci_userspace_device.clean()
+
+
 @pytest.fixture(scope='function')
 def nvme_device_raw(lone_config):
     from lone.nvme.device import NVMeDevice
@@ -131,7 +145,8 @@ def nvme_device_raw(lone_config):
         yield nvme_device
 
     finally:
-        pass
+        if 'nvme_device' in locals():
+            cleanup(nvme_device)
 
 
 @pytest.fixture(scope='function')
@@ -179,4 +194,5 @@ def nvme_device(request, lone_config, lone_logger):
         yield nvme_device
 
     finally:
-        pass
+        if 'nvme_device' in locals():
+            cleanup(nvme_device)
