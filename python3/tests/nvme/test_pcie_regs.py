@@ -98,6 +98,7 @@ def test_cap_offsets():
     pcie_regs.PCICapMSIX().set_offsets(0)
     pcie_regs.PCICapExpress().set_offsets(0)
     pcie_regs.PCICapPowerManagementInterface().set_offsets(0)
+    pcie_regs.PCICapExtendeDeviceSerialNumber().set_offsets(0)
 
 
 def test_indirect_access(mocker):

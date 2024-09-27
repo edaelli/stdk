@@ -54,7 +54,6 @@ class NVMeDeviceCommon:
 
     def __init__(self,
                  pci_slot,
-                 pci_userspace_device,
                  pcie_regs,
                  nvme_regs,
                  mem_mgr,
@@ -63,7 +62,6 @@ class NVMeDeviceCommon:
 
         # Save values passed in
         self.pci_slot = pci_slot
-        self.pci_userspace_device = pci_userspace_device
         self.pcie_regs = pcie_regs
         self.nvme_regs = nvme_regs
         self.mem_mgr = mem_mgr
@@ -135,6 +133,9 @@ class NVMeDeviceCommon:
         while True:
             if (time.time() - start_time) > timeout_s:
                 assert False, 'Device did not enable in {}s'.format(timeout_s)
+            elif self.nvme_regs.CSTS.CFS == 1:
+                assert False, 'Enabling while CFS=1, not watiting for RDY=1'
+                break
             elif self.nvme_regs.CSTS.RDY == 1:
                 break
             time.sleep(0)
@@ -323,6 +324,10 @@ class NVMeDeviceCommon:
             if time.time() > max_time:
                 break
 
+            if self.nvme_regs.CSTS.CFS == 1:
+                logger.error('CFS = 1 while looking for completions!')
+                break
+
             # Yield in case other threads are running
             time.sleep(0)
 
@@ -382,6 +387,10 @@ class NVMeDeviceCommon:
                 break
 
             if time.time() > max_time:
+                break
+
+            if self.nvme_regs.CSTS.CFS == 1:
+                logger.error('CFS = 1 while looking for completions!')
                 break
 
         return num_completions
@@ -505,16 +514,6 @@ class NVMeDeviceCommon:
             # Copy data out to it
             prp.set_data_buffer(bytes(command.data_out))
 
-    def __del__(self):
-        # Disable when no more references to this exist. This helps in cases where
-        #   we see an exception but the drive is still reading/writing to/from pci memory.
-        #   Disabling here hopefully tells the drive it is not allowed to use pci memory anymore
-        try:
-            self.cc_disable()
-        except Exception:
-            # Best effort, if something goes wrong, just ignore it!
-            pass
-
 
 def NVMeDevice(pci_slot):
     ''' Helper function to allow tests/modules/etc to pick a physical or simulated
@@ -522,8 +521,8 @@ def NVMeDevice(pci_slot):
         as a real device in the pci bus
     '''
     if pci_slot == 'nvsim':
-        from nvsim import NVMeSimulator
-        return NVMeSimulator('nvsim')
+        from nvsim.simulators.generic import GenericNVMeNVSimDevice
+        return GenericNVMeNVSimDevice()
     else:
         return NVMeDevicePhysical(pci_slot)
 
@@ -540,7 +539,7 @@ class NVMeDevicePhysical(NVMeDeviceCommon):
         # Create a pci_userspace_device, then get pcie and nvme regs
         device_found = False
         try:
-            pci_userspace_device = System.PciUserspaceDevice(pci_slot)
+            self.pci_userspace_device = System.PciUserspaceDevice(pci_slot)
             device_found = True
         except Exception as e:
             e
@@ -549,24 +548,21 @@ class NVMeDevicePhysical(NVMeDeviceCommon):
         if not device_found:
             raise NVMeDevicePhysicalNotFoundError(f'Not able to access {pci_slot}')
 
-        pci_regs = pci_userspace_device.pci_regs()
+        pci_regs = self.pci_userspace_device.pci_regs()
         pci_regs.init_capabilities()
 
-        nvme_regs = pci_userspace_device.nvme_regs()
-
-        # Figure out our MPS to use with the memory manager
-        self.mps = 2 ** (12 + nvme_regs.CC.MPS)
+        nvme_regs = self.pci_userspace_device.nvme_regs()
 
         # Memory manager
+        self.mps = 2 ** (12 + nvme_regs.CC.MPS)
         mem_mgr = System.DevMemMgr(self.mps,
-                                   pci_userspace_device.map_dma_region_read,
-                                   pci_userspace_device.map_dma_region_write,
-                                   pci_userspace_device.unmap_dma_region,
-                                   pci_userspace_device.iova_ranges)
+                                   self.pci_userspace_device.map_dma_region_read,
+                                   self.pci_userspace_device.map_dma_region_write,
+                                   self.pci_userspace_device.unmap_dma_region,
+                                   self.pci_userspace_device.iova_ranges)
 
         # Initialize NVMeDeviceCommon
         super().__init__(pci_slot,
-                         pci_userspace_device,
                          pci_regs,
                          nvme_regs,
                          mem_mgr)

@@ -1,20 +1,21 @@
-from nvsim.cmd_handlers import NvsimCommandHandlers
 from lone.nvme.spec.commands.status_codes import status_codes
 from lone.nvme.spec.prp import PRP
 from lone.nvme.spec.commands.nvm.read import Read
 from lone.nvme.spec.commands.nvm.write import Write
 from lone.nvme.spec.commands.nvm.flush import Flush
+from nvsim.cmd_handlers import NVSimCmdHandlerInterface
 
 import logging
 logger = logging.getLogger('nvsim_nvm')
 
 
-class NVSimWrite:
+class NVSimWrite(NVSimCmdHandlerInterface):
     OPC = Write().OPC
 
-    def __call__(self, nvsim_state, command, sq, cq):
+    @staticmethod
+    def __call__(nvsim, command, sq, cq):
         wr_cmd = Write.from_buffer(command)
-        ns = nvsim_state.namespaces[wr_cmd.NSID]
+        ns = nvsim.config.namespaces[wr_cmd.NSID]
 
         logger.debug('Write SLBA: 0x{:x} NLB: {} NSID: {}'.format(
             wr_cmd.SLBA, wr_cmd.NLB, wr_cmd.NSID))
@@ -25,7 +26,7 @@ class NVSimWrite:
 
         else:
             # Make a PRP object from the command's information
-            prp = PRP(None, (wr_cmd.NLB + 1) * ns.block_size, nvsim_state.mps, None,
+            prp = PRP(None, (wr_cmd.NLB + 1) * ns.block_size, nvsim.config.mps, None,
                       'NVSimWrite', alloc=False).from_address(wr_cmd.DPTR.PRP.PRP1,
                                                               wr_cmd.DPTR.PRP.PRP2)
 
@@ -35,15 +36,16 @@ class NVSimWrite:
             status_code = status_codes['Successful Completion']
 
         # Complete the command
-        self.complete(command, sq, cq, status_code)
+        NVSimCmdHandlerInterface.complete(command.CID, sq, cq, status_code)
 
 
-class NVSimRead:
+class NVSimRead(NVSimCmdHandlerInterface):
     OPC = Read().OPC
 
-    def __call__(self, nvsim_state, command, sq, cq):
+    @staticmethod
+    def __call__(nvsim, command, sq, cq):
         rd_cmd = Read.from_buffer(command)
-        ns = nvsim_state.namespaces[rd_cmd.NSID]
+        ns = nvsim.config.namespaces[rd_cmd.NSID]
 
         logger.debug('Read SLBA: 0x{:x} NLB: {} NSID: {}'.format(
             rd_cmd.SLBA, rd_cmd.NLB, rd_cmd.NSID))
@@ -55,7 +57,7 @@ class NVSimRead:
         else:
 
             # Make a PRP object from the command's information
-            prp = PRP(None, (rd_cmd.NLB + 1) * ns.block_size, nvsim_state.mps, None,
+            prp = PRP(None, (rd_cmd.NLB + 1) * ns.block_size, nvsim.config.mps, None,
                       'NVSimRead', alloc=False).from_address(rd_cmd.DPTR.PRP.PRP1,
                                                              rd_cmd.DPTR.PRP.PRP2)
 
@@ -65,15 +67,16 @@ class NVSimRead:
             status_code = status_codes['Successful Completion']
 
         # Complete the command
-        self.complete(command, sq, cq, status_code)
+        NVSimCmdHandlerInterface.complete(command.CID, sq, cq, status_code)
 
 
-class NVSimFlush:
+class NVSimFlush(NVSimCmdHandlerInterface):
     OPC = Flush().OPC
 
-    def __call__(self, nvsim_state, command, sq, cq):
+    @staticmethod
+    def __call__(nvsim, command, sq, cq):
         flush_cmd = Flush.from_buffer(command)
-        valid_nsids = [i for i, ns in enumerate(nvsim_state.namespaces) if i != 0]
+        valid_nsids = [i for i, ns in enumerate(nvsim.config.namespaces) if i != 0]
         valid_nsids.append(0xFFFFFFFF)
 
         if flush_cmd.NSID not in valid_nsids:
@@ -82,14 +85,4 @@ class NVSimFlush:
             status_code = status_codes['Successful Completion']
 
         # Complete the command
-        self.complete(command, sq, cq, status_code)
-
-
-# Create our admin command handlers object. Can you do this with introspection??
-nvm_handlers = NvsimCommandHandlers()
-for handler in [
-    NVSimWrite,
-    NVSimRead,
-    NVSimFlush,
-]:
-    nvm_handlers.register(handler)
+        NVSimCmdHandlerInterface.complete(command.CID, sq, cq, status_code)

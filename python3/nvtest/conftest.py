@@ -119,24 +119,17 @@ def lone_config(pytestconfig):
 
 
 def cleanup(nvme_device):
+
     # Disabling then free all memory used by a test
-    nvme_device.cc_disable()
+    nvme_device.nvme_regs.CC.EN = 0
     nvme_device.mem_mgr.free_all()
 
     # Remove references to nvme_regs before we try to clean the device
     del nvme_device.nvme_regs
 
     # Real device specific cleanup
-    if nvme_device.pci_slot != 'nvsim':
+    if hasattr(nvme_device, 'pci_userspace_device'):
         nvme_device.pci_userspace_device.clean()
-
-    # Nvsim specific cleanup
-    elif nvme_device.pci_slot == 'nvsim':
-        nvme_device.sim_thread.stop()
-        nvme_device.sim_thread.join()
-
-    else:
-        pytest.fail('invalid device type')
 
 
 @pytest.fixture(scope='function')

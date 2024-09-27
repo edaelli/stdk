@@ -44,9 +44,12 @@ def mocked_nvme_device(mocker):
         def allocated_mem_list(self):
             return self._allocated_mem_list
 
-    nvme_device = NVMeDeviceCommon('test_slot', None,
-                                   pcie_regs, nvme_regs,
-                                   MockedMemMgr(4096), 64, 16)
+    nvme_device = NVMeDeviceCommon('test_slot',
+                                   pcie_regs,
+                                   nvme_regs,
+                                   MockedMemMgr(4096),
+                                   64,
+                                   16)
 
     # Mock sync_cmd
     def mocked_sync_cmd(command, sqid=None, cqid=None, timeout_s=10, check=True):
@@ -55,9 +58,6 @@ def mocked_nvme_device(mocker):
     mocker.patch.object(nvme_device, 'sync_cmd', mocked_sync_cmd)
 
     yield nvme_device
-
-    # Make sure that the disable when the nvme_device is deleted doesnt timeout
-    nvme_device.nvme_regs.CSTS.RDY = 0
 
 
 ####################################################################################################

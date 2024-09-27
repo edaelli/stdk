@@ -274,6 +274,10 @@ def pcie_reg_struct_factory(access_data):
             def set_offsets(self, base_offset):
                 self._base_offset_ = base_offset
 
+        class PCICapabilityExt(RegsStructAccess):
+            def set_offsets(self, base_offset):
+                self._base_offset_ = base_offset
+
         class PCICapabilityGen(PCICapability):
             _cap_id_ = None
             _pack_ = 1
@@ -284,9 +288,6 @@ def pcie_reg_struct_factory(access_data):
             ]
             _access_ = access_data
             _base_offset_ = None
-
-        class PCICapabilityUnknown(PCICapabilityGen):
-            _cap_id_ = 0x00
 
         class PCICapPowerManagementInterface(PCICapability):
             _cap_id_ = 0x1
@@ -637,7 +638,7 @@ def pcie_reg_struct_factory(access_data):
                 self.Pxdcap2._base_offset_ = base_offset + 20
                 self.Pxdc2._base_offset_ = base_offset + 24
 
-        class PCICapabilityGenExtended(PCICapability):
+        class PCICapabilityGenExtended(PCICapabilityExt):
             _cap_id_ = None
             _pack_ = 1
             _fields_ = [
@@ -648,10 +649,7 @@ def pcie_reg_struct_factory(access_data):
             _access_ = access_data
             _base_offset_ = None
 
-        class PCICapabilityExtUnknown(PCICapabilityGenExtended):
-            _cap_id_ = 0x00
-
-        class PCICapExtendedAer(PCICapability):
+        class PCICapExtendedAer(PCICapabilityExt):
             _cap_id_ = 0x1
 
             class Aeruces(RegsStructAccess):
@@ -844,7 +842,7 @@ def pcie_reg_struct_factory(access_data):
             _access_ = access_data
             _base_offset_ = None
 
-        class PCICapExtendeDeviceSerialNumber(PCICapability):
+        class PCICapExtendeDeviceSerialNumber(PCICapabilityExt):
             _cap_id_ = 0x3
 
             _pack_ = 1
@@ -866,22 +864,22 @@ class PCIeRegisters:
     def init_capabilities(self):
 
         PCIeCapabilityIdTable = [
-            self.PCICapabilityUnknown,
+            self.PCICapabilityGen,
             self.PCICapPowerManagementInterface,
-            *([self.PCICapabilityUnknown] * 3),
+            *([self.PCICapabilityGen] * 3),
             self.PCICapMSI,
-            *([self.PCICapabilityUnknown] * 10),
+            *([self.PCICapabilityGen] * 10),
             self.PCICapExpress,
             self.PCICapMSIX,
-            *([self.PCICapabilityUnknown] * 238),
+            *([self.PCICapabilityGen] * 238),
         ]
 
         PCIeCapabilityExtIdTable = [
-            self.PCICapabilityUnknown,
+            self.PCICapabilityGen,
             self.PCICapExtendedAer,
-            *([self.PCICapabilityUnknown] * 1),
+            *([self.PCICapabilityGen] * 1),
             self.PCICapExtendeDeviceSerialNumber,
-            *([self.PCICapabilityExtUnknown] * 251),
+            *([self.PCICapabilityGenExtended] * 251),
         ]
 
         # Collect capabilities into a list
@@ -935,7 +933,7 @@ class PCIeRegisters:
                     capability.set_offsets(capability._base_offset_)
 
                 # Only add if cap id is known
-                if type(capability) in [self.PCICapabilityUnknown, self.PCICapabilityExtUnknown]:
+                if type(capability) in [self.PCICapabilityGen, self.PCICapabilityGenExtended]:
                     logging.info('Found unsupported Capability {}: 0x{:x}'.format(
                         'gen' if next_cap_ptr < 0x100 else 'ext', capability.CAP_ID))
                 else:

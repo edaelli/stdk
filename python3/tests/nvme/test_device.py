@@ -10,7 +10,7 @@ from lone.nvme.spec.commands.admin.identify import (IdentifyNamespaceListData,
                                                     IdentifyNamespaceData)
 from lone.nvme.spec.commands.status_codes import NVMeStatusCodeException
 
-from nvsim import NVMeSimulator
+from nvsim.simulators.generic import GenericNVMeNVSimDevice
 
 
 ####################################################################################################
@@ -34,14 +34,20 @@ def test_nvme_device_cid_mgr():
 def test_nvme_device_common_init():
     ''' def __init__(self,
                  pci_slot,
-                 pci_userspace_device,
                  pcie_regs,
                  nvme_regs,
                  mem_mgr,
                  sq_entry_size=64,
                  cq_entry_size=16):
     '''
-    nvme_device = NVMeDeviceCommon(None, None, None, None, None, None, None)
+    nvme_device = NVMeDeviceCommon(None,
+                                   None,
+                                   SimpleNamespace(
+                                       CC=SimpleNamespace(
+                                           MPS=0)),
+                                   None,
+                                   None,
+                                   None)
 
     # Check init values
     assert nvme_device.cid_mgr is not None
@@ -63,14 +69,14 @@ def test_cc_disable(mocker, mocked_nvme_device):
     ''' def cc_disable(self, timeout_s=10):
     '''
     # Mock time.sleep for these tests
-    mocker.patch('time.sleep', None)
+    mocker.patch('time.sleep', lambda x: None)
 
     # Timeout path, includes more than one loop
     mocked_nvme_device.nvme_regs.CSTS.RDY = 1
     with pytest.raises(Exception):
         mocked_nvme_device.cc_disable(timeout_s=0)
     with pytest.raises(Exception):
-        mocked_nvme_device.cc_disable(timeout_s=1)
+        mocked_nvme_device.cc_disable(timeout_s=0.001)
     assert mocked_nvme_device.nvme_regs.CSTS.RDY == 1
     assert mocked_nvme_device.nvme_regs.CC.EN == 0
 
@@ -98,15 +104,26 @@ def test_cc_enable(mocker, mocked_nvme_device):
     ''' def cc_enable(self, timeout_s=10):
     '''
     # Mock time.sleep for these tests
-    mocker.patch('time.sleep', None)
+    mocker.patch('time.sleep', lambda x: None)
+    mocked_nvme_device.nvme_regs.CC.EN = 0
 
     # Timeout path, includes more than one loop
     mocked_nvme_device.nvme_regs.CSTS.RDY = 0
     with pytest.raises(Exception):
         mocked_nvme_device.cc_enable(timeout_s=0)
-    with pytest.raises(Exception):
-        mocked_nvme_device.cc_enable(timeout_s=1)
     assert mocked_nvme_device.nvme_regs.CC.EN == 1
+
+    mocked_nvme_device.nvme_regs.CSTS.RDY = 0
+    with pytest.raises(Exception):
+        mocked_nvme_device.cc_enable(timeout_s=0.1)
+    assert mocked_nvme_device.nvme_regs.CC.EN == 1
+
+    mocked_nvme_device.nvme_regs.CSTS.RDY = 0
+    mocked_nvme_device.nvme_regs.CSTS.CFS = 1
+    with pytest.raises(Exception):
+        mocked_nvme_device.cc_enable(timeout_s=0.1)
+    assert mocked_nvme_device.nvme_regs.CC.EN == 1
+    mocked_nvme_device.nvme_regs.CSTS.CFS = 0
 
     # Sucessful enable path
     mocked_nvme_device.nvme_regs.CSTS.RDY = 1
@@ -286,6 +303,11 @@ def test_poll_cq_completions(mocker, mocked_nvme_device):
     mocked_nvme_device.get_completion = lambda x: False
     assert mocked_nvme_device.poll_cq_completions(max_time_s=0.0001) == 0
 
+    # CFS bit detection
+    mocked_nvme_device.get_completion = lambda x: False
+    mocked_nvme_device.nvme_regs.CSTS.CFS = 1
+    assert mocked_nvme_device.poll_cq_completions(max_time_s=0.0001) == 0
+
 
 def test_get_completion(mocker, mocked_nvme_device, mocked_admin_cmd):
     ''' def get_completion(self, cqid):
@@ -339,6 +361,10 @@ def test_get_msix_completions(mocker, mocked_nvme_device):
         mocked_nvme_device.get_msix_completions('invalid type')
 
     # Test max time path
+    assert mocked_nvme_device.get_msix_completions(0, max_time_s=0.0001) == 0
+
+    # CFS bit detection
+    mocked_nvme_device.nvme_regs.CSTS.CFS = 1
     assert mocked_nvme_device.get_msix_completions(0, max_time_s=0.0001) == 0
 
     # Test actually receiving completions path!
@@ -448,18 +474,13 @@ def test_alloc(mocked_nvme_device, mocked_admin_cmd, mocked_nvm_cmd):
         mocked_nvme_device.alloc(mocked_nvm_cmd)
 
 
-def test_delete(mocked_nvme_device):
-    ''' def __del__(self):
-    '''
-    mocked_nvme_device.__del__()
-
-
 ####################################################################################################
 # NVMeDevice tests
 ####################################################################################################
 def test_nvme_device(mocker):
     # Test that we get the right type of device when using nvsim and a real pcie device
-    assert type(NVMeDevice('nvsim')) is NVMeSimulator
+    mocker.patch('threading.Thread.start')
+    assert type(NVMeDevice('nvsim')) is GenericNVMeNVSimDevice
 
     mocker.patch('lone.nvme.device.NVMeDevicePhysical.__init__', lambda x, y: None)
     assert type(NVMeDevice('test_slot')) is NVMeDevicePhysical
@@ -481,10 +502,11 @@ def test_nvme_device_physical(mocker):
             pass
 
         def pci_regs(self):
-            return SimpleNamespace(init_capabilities=lambda: None)
+            return SimpleNamespace(init_capabilities=lambda: None,
+                                   CMD=SimpleNamespace(BME=0))
 
         def nvme_regs(self):
-            return SimpleNamespace(CC=SimpleNamespace(MPS=0))
+            return SimpleNamespace(CC=SimpleNamespace(MPS=0, EN=0))
 
         def map_dma_region_read(self):
             pass
