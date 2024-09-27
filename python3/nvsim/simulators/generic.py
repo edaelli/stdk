@@ -225,6 +225,9 @@ class GenericNVMeNVSimConfig:
             GenericNVMeNVSimNamespace(512, 4096, '/tmp/ns1.dat'),
             GenericNVMeNVSimNamespace(960, 4096, '/tmp/ns2.dat'),
         ]
+        self.init_namespaces_data()
+
+    def init_namespaces_data(self):
 
         # Intialize IdentifyNamespaceData for each namespace
         self.id_ns_data = [None]

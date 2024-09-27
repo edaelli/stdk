@@ -523,6 +523,9 @@ def NVMeDevice(pci_slot):
     if pci_slot == 'nvsim':
         from nvsim.simulators.generic import GenericNVMeNVSimDevice
         return GenericNVMeNVSimDevice()
+    if pci_slot == 'nvsim_fdp':
+        from nvsim.simulators.fdp import FDPNVMeSimDevice
+        return FDPNVMeSimDevice()
     else:
         return NVMeDevicePhysical(pci_slot)
 
