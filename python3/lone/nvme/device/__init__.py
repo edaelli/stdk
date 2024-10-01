@@ -289,6 +289,12 @@ class NVMeDeviceCommon:
             self.sync_cmd(del_cq_cmd, timeout_s=1)
             self.queue_mgr.remove_cq(cqid)
 
+    def posted_command(self):
+        ''' Interface that can be overridden by custom devices that need to know
+            when a command is posted (useful for simulators).
+        '''
+        pass
+
     def post_command(self, command):
 
         # Set a CID for the command
@@ -296,6 +302,7 @@ class NVMeDeviceCommon:
 
         # Post the command on the next available sq slot
         command.sq.post_command(command)
+        self.posted_command()
 
         # Keep track of outstanding commands
         self.outstanding_commands[(command.CID, command.sq.qid)] = command

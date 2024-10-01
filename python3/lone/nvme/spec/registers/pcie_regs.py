@@ -7,7 +7,7 @@ from lone.nvme.spec.registers import RegsStructAccess
 
 
 #   pci registers in various implementations.
-PCIeAccessData = namedtuple('PCIeAccessData', 'get_func set_func')
+PCIeAccessData = namedtuple('PCIeAccessData', 'get_func set_func, get_notify, set_notify')
 
 
 def pcie_reg_struct_factory(access_data):
@@ -898,7 +898,7 @@ class PCIeRegisters:
                     cap_gen = self.PCICapabilityGen()
 
                     # Different handling for direct vs indirect registers
-                    if type(self) is PCIeRegistersDirect:
+                    if type(self).direct is True:
                         cap_gen = self.PCICapabilityGen.from_address(
                             ctypes.addressof(self) + next_cap_ptr)
                     else:
@@ -912,8 +912,7 @@ class PCIeRegisters:
                     # Make a generic capability first so we can find out what type it is
                     cap_gen_e = self.PCICapabilityGenExtended()
 
-                    # Different handling for direct vs indirect registers
-                    if type(self) is PCIeRegistersDirect:
+                    if type(self).direct is True:
                         cap_gen_e = self.PCICapabilityGenExtended.from_address(
                             ctypes.addressof(self) + next_cap_ptr)
                     else:
@@ -924,7 +923,7 @@ class PCIeRegisters:
                     cap_obj = PCIeCapabilityExtIdTable[cap_gen_e.CAP_ID]
 
                 # Only add known types to the capabilities list
-                if type(self) is PCIeRegistersDirect:
+                if type(self).direct is True:
                     capability = cap_obj.from_address(ctypes.addressof(self.ID) + next_cap_ptr)
                 else:
                     capability = cap_obj()
@@ -950,5 +949,8 @@ class PCIeRegisters:
                 print('{:50} 0x{:x}'.format(field, value))
 
 
-class PCIeRegistersDirect(pcie_reg_struct_factory(PCIeAccessData(None, None)), PCIeRegisters):
-    pass
+class PCIeRegistersDirect(pcie_reg_struct_factory(PCIeAccessData(None,
+                                                                 None,
+                                                                 None,
+                                                                 None)), PCIeRegisters):
+    direct = True

@@ -1,10 +1,13 @@
 import ctypes
 import mmap
+import copy
 
 from lone.system import MemoryLocation
 from lone.nvme.device import NVMeDeviceCommon
-from lone.nvme.spec.registers.pcie_regs import PCIeRegistersDirect
-from lone.nvme.spec.registers.nvme_regs import NVMeRegistersDirect
+from lone.nvme.spec.registers.pcie_regs import (pcie_reg_struct_factory,
+                                                PCIeAccessData,
+                                                PCIeRegisters)
+from lone.nvme.spec.registers.nvme_regs import nvme_reg_struct_factory, NVMeAccessData
 from lone.nvme.spec.queues import QueueMgr, NVMeSubmissionQueue, NVMeCompletionQueue
 from lone.nvme.spec.commands.admin.identify import (IdentifyNamespaceData,
                                                     IdentifyControllerData,
@@ -12,8 +15,6 @@ from lone.nvme.spec.commands.admin.identify import (IdentifyNamespaceData,
                                                     IdentifyUUIDListData)
 from nvsim.simulators import NVSimInterface
 from nvsim.simulators.nvsim_thread import NVSimThread
-from nvsim.reg_handlers.pcie import PCIeRegChangeHandler
-from nvsim.reg_handlers.nvme import NVMeRegChangeHandler
 from nvsim.memory import SimMemMgr
 from nvsim.cmd_handlers import NVSimCommandNotSupported
 from nvsim.cmd_handlers.admin import (NVSimIdentify,
@@ -316,21 +317,34 @@ class GenericNVMeNVSim(NVSimInterface):
         # Save config
         self.config_type = config_type
 
+        # Create our thread, but dont start it until requested
+        self.thread = NVSimThread(self)
+
         # Create the object to access PCIe registers
-        self.pcie_regs = PCIeRegistersDirect()
+        class PCIeRegistersSimDirect(pcie_reg_struct_factory(
+                                     PCIeAccessData(None,
+                                                    None,
+                                                    None,
+                                                    self.thread.pcie_changed)), PCIeRegisters):
+            direct = True
+        self.pcie_regs = PCIeRegistersSimDirect()
 
         # Create the object to access NVMe registers
-        self.nvme_regs = NVMeRegistersDirect()
+        class NVMeRegistersSimDirect(nvme_reg_struct_factory(
+                                     NVMeAccessData(None,
+                                                    None,
+                                                    None,
+                                                    self.thread.nvme_changed))):
+            pass
+        self.nvme_regs = NVMeRegistersSimDirect()
 
         # Initialize config (and internal states) for the simulated device
         self.config = self.config_type(self.pcie_regs, self.nvme_regs)
 
-        # Set our handlers for the simulation thread
-        self.pcie_handler = PCIeRegChangeHandler(self)
-        self.nvme_handler = NVMeRegChangeHandler(self)
-
-        # Create our thread, but dont start it until requested
-        self.thread = NVSimThread(self)
+        # After the config which initializes the registers make sure to
+        #  save a copy of them before we get called with changes
+        self.old_pcie_regs = copy.deepcopy(self.pcie_regs)
+        self.old_nvme_regs = copy.deepcopy(self.nvme_regs)
 
         # Clear reset flag
         self.reset = False
@@ -347,12 +361,6 @@ class GenericNVMeNVSim(NVSimInterface):
     ###############################################################################################
     # NVSimInterface implementation for this device
     ###############################################################################################
-    def nvsim_pcie_handler(self):
-        self.pcie_handler()
-
-    def nvsim_nvme_handler(self):
-        self.nvme_handler()
-
     def nvsim_exception_handler(self, exception):
         logger.error('Simulator thread raised an exception and is no longer running!')
         logger.exception(exception)
@@ -360,39 +368,43 @@ class GenericNVMeNVSim(NVSimInterface):
         # Set CFS on simulator exceptions so calling code can stop early
         self.nvme_regs.CSTS.CFS = 1
 
-    def nvsim_pcie_regs_changed(self, old_pcie_regs, new_pcie_regs):
+    def nvsim_pcie_regs_changed(self):
         # PCIe register changes handled here
 
         # First check capabilitiers changed
-        for old_cap, new_cap in zip(old_pcie_regs.capabilities, new_pcie_regs.capabilities):
+        for old_cap, new_cap in zip(self.old_pcie_regs.capabilities, self.pcie_regs.capabilities):
             if old_cap != new_cap:
-                if type(new_cap) is new_pcie_regs.PCICapExpress:
+                if type(new_cap) is self.pcie_regs.PCICapExpress:
                     if old_cap.PXDC.IFLR == 0 and new_cap.PXDC.IFLR == 1:
                         logger.debug('Initiate FLR requested!')
                         self.config = self.config_type(self.pcie_regs, self.nvme_regs)
                         break
 
+        self.old_pcie_regs = copy.deepcopy(self.pcie_regs)
+
         # Then check all other registers
         #  Nothing here yet!
 
-    def nvsim_nvme_regs_changed(self, old_nvme_regs, new_nvme_regs):
+    def nvsim_nvme_regs_changed(self):
         # Nvme register changes handled here
 
         # Did we just transition from not enabled to enabled?
-        if (old_nvme_regs.CC.EN == 0 and new_nvme_regs.CC.EN == 1):
+        if (self.old_nvme_regs.CC.EN == 0 and self.nvme_regs.CC.EN == 1):
             # Call nvsim_enable simulator interface
             self.enable()
 
         # Did we just transition from enabled to not enabled?
-        if (old_nvme_regs.CC.EN == 1 and
-                new_nvme_regs.CC.EN == 0):
+        if (self.old_nvme_regs.CC.EN == 1 and
+                self.nvme_regs.CC.EN == 0):
             # Call nvsim_disable simulator interface
             self.disable()
 
         # If we are ready go check for commands
-        if new_nvme_regs.CSTS.RDY == 1:
+        if self.nvme_regs.CSTS.RDY == 1:
             # Check for commands
             self.check_commands()
+
+        self.old_nvme_regs = copy.deepcopy(self.nvme_regs)
 
     @staticmethod
     def check_mem_access(mem):
@@ -494,6 +506,9 @@ class GenericNVMeNVSimDevice(NVMeDeviceCommon):
 
         # Create simulated device
         super().__init__('nvsim', pcie_regs, nvme_regs, mem_mgr)
+
+    def posted_command(self):
+        self.sim_thread.check_commands()
 
     def __del__(self):
         # Wait until the sim device is gc'd to stop the thread

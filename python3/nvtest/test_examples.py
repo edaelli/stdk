@@ -39,13 +39,6 @@ def test_nvme_device_raw(nvme_device_raw):
     #  The nvme_device_raw is configured by the information
     #  in the lone config file passed in as the --config parameter
 
-    # Check the registers are of the right type
-    from lone.nvme.spec.registers.pcie_regs import PCIeRegisters
-    assert issubclass(type(nvme_device_raw.pcie_regs), PCIeRegisters)
-
-    from lone.nvme.spec.registers.nvme_regs import NVMeRegistersDirect
-    assert type(nvme_device_raw.nvme_regs) is NVMeRegistersDirect
-
     # Check a couple of values in pcie and nvme for demonstration
 
     # Make sure that PCIe VID and DID are not zero

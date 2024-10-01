@@ -111,8 +111,11 @@ def test_indirect_access(mocker):
     def write_byte(offset, value):
         test_data[offset] = value
 
-    class Registers(pcie_reg_struct_factory(PCIeAccessData(read_byte, write_byte)), PCIeRegisters):
-        pass
+    class Registers(pcie_reg_struct_factory(PCIeAccessData(read_byte,
+                                                           write_byte,
+                                                           None,
+                                                           None)), PCIeRegisters):
+        direct = False
     pcie_regs = Registers()
 
     # Make sure there is a _fields_ attribute

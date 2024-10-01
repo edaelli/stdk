@@ -1,41 +1,54 @@
 import time
 import threading
 
+from nvsim.simulators import NVSimInterface
+
 import logging
 logger = logging.getLogger('nvsim_thread')
 
 
 class NVSimThread(threading.Thread):
     def __init__(self, nvme_device):
+        self.nvme_device = nvme_device
+
+        # Sanity check for interface type
+        assert issubclass(type(self.nvme_device), NVSimInterface), (
+            'Must be a subclass of NVSimInterface')
+
+        # Save interfaces off here to avoid dereferencing every loop
+        self.ifc_pcie_changed = self.nvme_device.nvsim_pcie_regs_changed
+        self.ifc_nvme_changed = self.nvme_device.nvsim_nvme_regs_changed
+
+        # Intialize thread stuff
         threading.Thread.__init__(self)
-        self.stop_event = threading.Event()
-        self.lock = threading.Lock()
         self.daemon = True
 
-        # Devices must implement the following interfaces
-        try:
-            self.pcie_handler = nvme_device.nvsim_pcie_handler
-            self.nvme_handler = nvme_device.nvsim_nvme_handler
-            self.exception_handler = nvme_device.nvsim_exception_handler
-        except AttributeError:
-            raise Exception('NVMe simulated device must implement the NVMeSimulator interface')
+        # Initialize Events
+        self.stop_event = threading.Event()
+        self.nvme_regs_event = threading.Event()
+        self.pcie_regs_event = threading.Event()
 
     def stop(self):
         self.stop_event.set()
+
+    def pcie_changed(self):
+        self.pcie_regs_event.set()
+
+    def nvme_changed(self):
+        self.nvme_regs_event.set()
 
     def run(self):
 
         while True:
             try:
-                # Check for changes to pcie registers and act on them, make sure to
-                #  lock so register objects are not able to move under the checking
-                with self.lock:
-                    self.pcie_handler()
+                # Call interfaces, checking for exceptions
+                if self.pcie_regs_event.is_set():
+                    self.ifc_pcie_changed()
+                    self.pcie_regs_event.clear()
 
-                # Check for changes to nvme registers and act on them, make sure to
-                #  lock so register objects are not able to move under the checking
-                with self.lock:
-                    self.nvme_handler()
+                if self.nvme_regs_event.is_set():
+                    self.ifc_nvme_changed()
+                    self.nvme_regs_event.clear()
 
             except Exception as e:
                 # If the simulator code sees an exception while handling changes we

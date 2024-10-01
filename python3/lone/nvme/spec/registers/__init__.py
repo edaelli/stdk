@@ -57,6 +57,9 @@ class RegsStructAccess(ComparableStruct):
                 self._access_.set_func(offset, write_byte)
                 offset += 1
 
+        if self._access_.set_notify is not None:
+            self._access_.set_notify()
+
     def __getattribute__(self, name):
 
         # If _access_.get_func is not set, just use ctypes

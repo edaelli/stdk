@@ -382,9 +382,11 @@ class SysVfioIfc(SysPciUserspaceDevice):
     def pci_regs(self):
 
         class PCIeRegistersVFIO(pcie_reg_struct_factory(PCIeAccessData(self.pcie_get,
-                                                                       self.pcie_set)),
+                                                                       self.pcie_set,
+                                                                       None,
+                                                                       None)),
                                 PCIeRegisters):
-            pass
+            direct = False
 
         return PCIeRegistersVFIO()
 

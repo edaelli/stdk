@@ -19,6 +19,8 @@ class SimMemMgr(DevMemMgr):
         vaddr = ctypes.addressof(memory_obj)
 
         # Create the memory location object from the allocated memory above
+        #   Since both the simulator and test software are using memory as a
+        #   user space application, vaddr == iova
         mem = MemoryLocation(vaddr, vaddr, size, client)
         mem.mem_obj = memory_obj
         self._allocated_mem_list.append(mem)

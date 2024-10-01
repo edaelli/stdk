@@ -8,7 +8,7 @@ from collections import namedtuple
 from lone.util.struct_tools import StructFieldsIterator
 from lone.nvme.spec.registers import RegsStructAccess
 
-NVMeAccessData = namedtuple('NVMeAccessData', 'get_func set_func')
+NVMeAccessData = namedtuple('NVMeAccessData', 'get_func set_func get_notify set_notify')
 
 
 def nvme_reg_struct_factory(access_data):
@@ -499,5 +499,5 @@ def nvme_reg_struct_factory(access_data):
     return Registers
 
 
-class NVMeRegistersDirect(nvme_reg_struct_factory(NVMeAccessData(None, None))):
+class NVMeRegistersDirect(nvme_reg_struct_factory(NVMeAccessData(None, None, None, None))):
     pass

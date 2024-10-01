@@ -10,15 +10,7 @@ class NVSimInterface(metaclass=abc.ABCMeta):
         raise NotImplementedError('not implemented')
 
     @abc.abstractmethod
-    def nvsim_pcie_handler(self):
-        raise NotImplementedError('not implemented')
-
-    @abc.abstractmethod
     def nvsim_pcie_regs_changed(self, old_pcie_regs, new_pcie_regs):
-        raise NotImplementedError('not implemented')
-
-    @abc.abstractmethod
-    def nvsim_nvme_handler(self):
         raise NotImplementedError('not implemented')
 
     @abc.abstractmethod
